@@ -28,6 +28,7 @@ export const subscribeEmail = async (req: Request, res: Response, next: NextFunc
         success: true,
         message: "You are already subscribed to the Aqua Pets newsletter!",
         subscriber: existing,
+        data: existing,
       });
       return;
     }
@@ -42,6 +43,7 @@ export const subscribeEmail = async (req: Request, res: Response, next: NextFunc
       success: true,
       message: "Thank you for subscribing! Your email has been added to our newsletter list.",
       subscriber: newSubscriber,
+      data: newSubscriber,
     });
   } catch (error: any) {
     next(error);

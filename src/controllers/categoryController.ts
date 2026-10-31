@@ -304,7 +304,13 @@ export const createCategory = async (req: Request, res: Response, next: NextFunc
 export const updateCategory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const category = await Category.findByIdAndUpdate(id, req.body, { new: true, runValidators: true });
+    const idStr = String(id);
+    let category;
+    if (idStr.match(/^[0-9a-fA-F]{24}$/)) {
+      category = await Category.findByIdAndUpdate(idStr, req.body, { new: true, runValidators: true });
+    } else {
+      category = await Category.findOneAndUpdate({ slug: idStr }, req.body, { new: true, runValidators: true });
+    }
     if (!category) {
       res.status(404).json({ success: false, message: "Category not found" });
       return;
@@ -323,7 +329,13 @@ export const updateCategory = async (req: Request, res: Response, next: NextFunc
 export const deleteCategory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const category = await Category.findByIdAndDelete(id);
+    const idStr = String(id);
+    let category;
+    if (idStr.match(/^[0-9a-fA-F]{24}$/)) {
+      category = await Category.findByIdAndDelete(idStr);
+    } else {
+      category = await Category.findOneAndDelete({ slug: idStr });
+    }
     if (!category) {
       res.status(404).json({ success: false, message: "Category not found" });
       return;

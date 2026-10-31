@@ -2,8 +2,9 @@ import { Schema, model, Document, Types } from "mongoose";
 import bcrypt from "bcryptjs";
 
 export interface IAddress {
+  _id?: Types.ObjectId;
   fullName: string;
-  email: string;
+  email?: string;
   phone: string;
   houseBuilding: string;
   street: string;
@@ -11,6 +12,7 @@ export interface IAddress {
   state: string;
   pincode: string;
   isDefault?: boolean;
+  addressType?: string;
 }
 
 export interface IUser extends Document {
@@ -31,7 +33,7 @@ export interface IUser extends Document {
 
 const addressSchema = new Schema<IAddress>({
   fullName: { type: String, required: true },
-  email: { type: String, required: true },
+  email: { type: String, default: "" },
   phone: { type: String, required: true },
   houseBuilding: { type: String, required: true },
   street: { type: String, required: true },
@@ -39,6 +41,7 @@ const addressSchema = new Schema<IAddress>({
   state: { type: String, required: true },
   pincode: { type: String, required: true },
   isDefault: { type: Boolean, default: false },
+  addressType: { type: String, default: "HOME" },
 });
 
 const userSchema = new Schema<IUser>(

@@ -45,7 +45,7 @@ CATEGORY_META = {
     "Aquarium Plants": {"slug": "aquarium-plants", "description": "Live aquatic plants for planted aquariums.", "image": "/categories/aquarium-plants.jpg", "iconName": "Leaf", "tags": ["aquatic plant", "live plant", "moss", "carpet plant", "stem plant"]},
     "Artificial Plants": {"slug": "artificial-plants", "description": "High-quality artificial aquarium plants, zero maintenance.", "image": "/categories/artificial-plants.jpg", "iconName": "Sprout", "tags": ["artificial plant", "fake plant", "plastic plant", "decoration"]},
     "Gravel & Sand": {"slug": "gravel-sand", "description": "Natural gravel, black sand, coloured gravel, aquasoil and substrate.", "image": "/categories/gravel-sand.jpg", "iconName": "Layers", "tags": ["gravel", "sand", "substrate", "aquasoil"]},
-    "Aquarium Decorations": {"slug": "aquarium-decorations", "description": "Aquarium decorations including caves, castles and ornaments.", "image": "/categories/aquarium-decorations.jpg", "iconName": "Sparkles", "tags": ["decoration", "ornament", "cave", "castle", "background"]},
+    "Aquarium Decorations": {"slug": "aquarium-decorations", "description": "Aquarium decorations including caves, castles and ornaments.", "image": "/categories/aquarium-decorations.jpg", "iconName": "Compass", "tags": ["decoration", "ornament", "cave", "castle", "background"]},
     "Driftwood & Rocks": {"slug": "driftwood-rocks", "description": "Natural driftwood, lava rock, seiryu stone and hardscape materials.", "image": "/categories/driftwood-rocks.jpg", "iconName": "Mountain", "tags": ["driftwood", "rock", "hardscape", "stone", "lava rock"]},
     "Aquascaping Tools": {"slug": "aquascaping-tools", "description": "Professional aquascaping tools including tweezers, scissors and spatulas.", "image": "/categories/aquascaping-tools.jpg", "iconName": "Scissors", "tags": ["aquascaping tool", "tweezers", "scissors", "scraper"]},
     "CO2 & Planted Tank": {"slug": "co2-planted-tank", "description": "CO2 systems, regulators, diffusers and accessories for planted tanks.", "image": "/categories/co2-planted-tank.jpg", "iconName": "Gauge", "tags": ["CO2", "planted tank", "CO2 diffuser", "CO2 regulator"]},
@@ -118,6 +118,69 @@ def get_tags(category, name, variant):
     return result[:12]
 
 
+def get_weight_and_dimensions(name, category):
+    n = (name or "").lower()
+    cat = (category or "").lower()
+
+    weight_kg = 0.5
+    dims = {"length": 15, "breadth": 10, "height": 8}
+
+    if "tank" in cat or "aquarium" in cat:
+        if '48"' in n or "48 inch" in n or "large" in n:
+            weight_kg, dims = 32.0, {"length": 122, "breadth": 30, "height": 45}
+        elif '36"' in n and '18"' in n:
+            weight_kg, dims = 22.0, {"length": 91, "breadth": 30, "height": 45}
+        elif '36"' in n:
+            weight_kg, dims = 16.0, {"length": 91, "breadth": 30, "height": 30}
+        elif "rimless" in n or "planted" in n or "marine" in n:
+            weight_kg, dims = 10.5, {"length": 60, "breadth": 30, "height": 36}
+        elif "nano" in n:
+            weight_kg, dims = 4.2, {"length": 30, "breadth": 30, "height": 30}
+        elif "bowl" in n:
+            weight_kg, dims = 1.8, {"length": 18, "breadth": 18, "height": 18}
+        else:
+            weight_kg, dims = 8.0, {"length": 45, "breadth": 28, "height": 30}
+    elif "gravel" in cat or "sand" in cat:
+        weight_kg, dims = 3.5, {"length": 30, "breadth": 20, "height": 10}
+    elif "driftwood" in cat or "rock" in cat:
+        weight_kg, dims = 2.5, {"length": 30, "breadth": 20, "height": 15}
+    elif "filter" in cat:
+        if "canister" in n:
+            weight_kg, dims = 4.8, {"length": 35, "breadth": 28, "height": 42}
+        elif "sponge" in n:
+            weight_kg, dims = 0.25, {"length": 12, "breadth": 12, "height": 18}
+        else:
+            weight_kg, dims = 0.85, {"length": 18, "breadth": 12, "height": 22}
+    elif "pump" in cat or "circulation" in cat:
+        weight_kg, dims = 0.95, {"length": 18, "breadth": 12, "height": 14}
+    elif "light" in cat:
+        weight_kg, dims = 0.75, {"length": 40, "breadth": 10, "height": 6}
+    elif "heater" in cat or "temperature" in cat:
+        weight_kg, dims = 0.35, {"length": 28, "breadth": 5, "height": 5}
+    elif "food" in cat:
+        weight_kg, dims = 0.35, {"length": 12, "breadth": 12, "height": 15}
+    elif "water-care" in cat or "medicine" in cat:
+        weight_kg, dims = 0.35, {"length": 8, "breadth": 8, "height": 18}
+    elif "co2" in cat:
+        weight_kg, dims = 3.5 if "cylinder" in n else 0.5, {"length": 35, "breadth": 12, "height": 12}
+    elif "plant" in cat:
+        weight_kg, dims = 0.15, {"length": 15, "breadth": 10, "height": 8}
+    elif "cleaning" in cat:
+        weight_kg, dims = 0.35, {"length": 30, "breadth": 10, "height": 6}
+    elif "feeding" in cat or "breeding" in cat:
+        weight_kg, dims = 0.35 if "feeder" in n else 0.2, {"length": 16, "breadth": 12, "height": 10}
+    elif "tool" in cat:
+        weight_kg, dims = 0.22, {"length": 28, "breadth": 6, "height": 3}
+    elif "decoration" in cat:
+        weight_kg, dims = 0.75, {"length": 18, "breadth": 14, "height": 14}
+    elif "media" in cat:
+        weight_kg, dims = 0.85, {"length": 20, "breadth": 15, "height": 10}
+    elif "spare" in cat:
+        weight_kg, dims = 0.35 if "timer" in n or "extension" in n else 0.15, {"length": 15, "breadth": 8, "height": 6}
+
+    return round(weight_kg, 2), dims
+
+
 def build_product(row, slug_registry):
     cat = row["category"]
     name = row["name"]
@@ -152,6 +215,7 @@ def build_product(row, slug_registry):
     description = f"{full_name} - {desc_tmpl}"
 
     cat_image = cat_meta.get("image", "")
+    weight_kg, dims = get_weight_and_dimensions(full_name, cat)
 
     return {
         "slug": slug,
@@ -175,8 +239,8 @@ def build_product(row, slug_registry):
         "isOffer": False,
         "offerType": None,
         "tankType": None,
-        "weightKg": 0.5,
-        "dimensions": {"length": 10, "breadth": 10, "height": 10},
+        "weightKg": weight_kg,
+        "dimensions": dims,
         "createdAt": datetime.utcnow(),
         "updatedAt": datetime.utcnow(),
     }

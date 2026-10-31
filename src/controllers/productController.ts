@@ -105,14 +105,64 @@ export const getProductBySlug = async (req: Request, res: Response, next: NextFu
   }
 };
 
+/**
+ * Automatically uploads any base64 data URL images in the list to Cloudinary
+ */
+const ensureCloudinaryImages = async (images: string[]): Promise<string[]> => {
+  if (!Array.isArray(images) || images.length === 0) return [];
+  const processed: string[] = [];
+
+  for (const img of images.slice(0, 4)) {
+    if (typeof img === "string" && img.startsWith("data:image/")) {
+      try {
+        const uploadRes = await cloudinary.uploader.upload(img, {
+          folder: "aqua-pets/products",
+          resource_type: "auto",
+          transformation: [{ quality: "auto", fetch_format: "auto" }],
+        });
+        processed.push(uploadRes.secure_url);
+      } catch (err) {
+        console.error("Failed to upload base64 image to Cloudinary during product save:", err);
+        processed.push(img);
+      }
+    } else if (typeof img === "string" && img.trim()) {
+      processed.push(img);
+    }
+  }
+
+  return processed;
+};
+
+const normalizeBrand = (brand?: string): string => {
+  if (!brand) return "Aqua Pets";
+  const b = brand.trim();
+  if (/^sunsun$/i.test(b)) return "SunSun";
+  if (/^bluepet$/i.test(b)) return "Bluepet";
+  if (/^hailea$/i.test(b)) return "Hailea";
+  if (/^rs\s*electrical$/i.test(b)) return "RS Electrical";
+  if (/^aquapets/i.test(b)) return "AquaPets Aquarium";
+  return b;
+};
+
 export const createProduct = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = { ...req.body };
+    if (data.brand) {
+      data.brand = normalizeBrand(data.brand);
+    }
     if (data.badge === "" || data.badge === null) delete data.badge;
     if (data.offerType === "" || data.offerType === null) delete data.offerType;
     if (data.tankType === "" || data.tankType === null) delete data.tankType;
+
+    let finalSlug = data.slug || (data.name ? data.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-") : `product-${Date.now()}`);
+    const existing = await Product.findOne({ slug: finalSlug });
+    if (existing) {
+      finalSlug = `${finalSlug}-${Date.now().toString().slice(-4)}`;
+    }
+    data.slug = finalSlug;
+
     if (Array.isArray(data.images)) {
-      data.images = data.images.slice(0, 4);
+      data.images = await ensureCloudinaryImages(data.images);
     }
 
     const product = await Product.create(data);
@@ -130,6 +180,9 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
   try {
     const { id } = req.params;
     const data = { ...req.body };
+    if (data.brand) {
+      data.brand = normalizeBrand(data.brand);
+    }
 
     const unsetFields: Record<string, 1> = {};
     if (data.badge === "" || data.badge === null) {
@@ -145,7 +198,7 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
       unsetFields.tankType = 1;
     }
     if (Array.isArray(data.images)) {
-      data.images = data.images.slice(0, 4);
+      data.images = await ensureCloudinaryImages(data.images);
     }
 
     const updateDoc: any = { $set: data };
@@ -156,9 +209,9 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     let product;
     const idStr = String(id);
     if (idStr.match(/^[0-9a-fA-F]{24}$/)) {
-      product = await Product.findByIdAndUpdate(idStr, updateDoc, { new: true, runValidators: true });
+      product = await Product.findByIdAndUpdate(idStr, updateDoc, { returnDocument: "after", runValidators: true });
     } else {
-      product = await Product.findOneAndUpdate({ slug: idStr }, updateDoc, { new: true, runValidators: true });
+      product = await Product.findOneAndUpdate({ slug: idStr }, updateDoc, { returnDocument: "after", runValidators: true });
     }
 
     if (!product) {
@@ -179,7 +232,18 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
 export const deleteProduct = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const product = await Product.findByIdAndDelete(id);
+    const idStr = decodeURIComponent(String(id).trim());
+    let product = null;
+
+    if (idStr.match(/^[0-9a-fA-F]{24}$/)) {
+      product = await Product.findById(idStr);
+    }
+    if (!product) {
+      product = await Product.findOne({ slug: idStr });
+    }
+    if (!product) {
+      product = await Product.findOne({ slug: idStr.toLowerCase() });
+    }
 
     if (!product) {
       res.status(404).json({ success: false, message: "Product not found" });
@@ -189,11 +253,14 @@ export const deleteProduct = async (req: Request, res: Response, next: NextFunct
     // Clean up associated Cloudinary images
     if (product.images && Array.isArray(product.images)) {
       for (const imgUrl of product.images) {
-        if (typeof imgUrl === "string" && imgUrl.includes("res.cloudinary.com")) {
-          const publicId = parseCloudinaryPublicId(imgUrl);
+        if (typeof imgUrl === "string" && (imgUrl.includes("cloudinary.com") || imgUrl.startsWith("aqua-pets/"))) {
+          const publicId = imgUrl.startsWith("aqua-pets/")
+            ? imgUrl.replace(/\.[a-zA-Z0-9]{3,4}$/, "")
+            : parseCloudinaryPublicId(imgUrl);
           if (publicId) {
             try {
-              await cloudinary.uploader.destroy(publicId);
+              const destroyRes = await cloudinary.uploader.destroy(publicId, { invalidate: true });
+              console.log(`Cloudinary destroyed asset [${publicId}] result:`, destroyRes);
             } catch (cErr) {
               console.warn(`Could not delete Cloudinary image ${publicId}:`, cErr);
             }
@@ -202,9 +269,12 @@ export const deleteProduct = async (req: Request, res: Response, next: NextFunct
       }
     }
 
+    await Product.findByIdAndDelete(product._id);
+
     res.json({
       success: true,
       message: "Product and associated images deleted successfully",
+      deletedId: product._id,
     });
   } catch (error) {
     next(error);

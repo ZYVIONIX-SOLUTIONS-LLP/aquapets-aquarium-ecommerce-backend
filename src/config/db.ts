@@ -1,5 +1,13 @@
+import dns from "dns";
 import mongoose from "mongoose";
 import { config } from "./env.js";
+
+// Ensure Atlas mongodb+srv resolution succeeds across all Windows / ISP networks
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch {
+  // Ignore fallback if custom dns cannot be set
+}
 
 export const connectDB = async (): Promise<void> => {
   try {
@@ -14,3 +22,4 @@ export const connectDB = async (): Promise<void> => {
 mongoose.connection.on("disconnected", () => {
   console.warn("⚠️ MongoDB disconnected. Attempting reconnection...");
 });
+

@@ -1,16 +1,26 @@
 import fs from "fs";
 import path from "path";
+import dns from "dns";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
 
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch {
+  // Ignore fallback
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import dotenv from "dotenv";
+dotenv.config();
+
 cloudinary.config({
-  cloud_name: "fubaby5m",
-  api_key: "273799561385971",
-  api_secret: "e_i6MBjSD4zINt1AzL6qB7MoePk",
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "xsxvzuhd",
+  api_key: process.env.CLOUDINARY_API_KEY || "523591489351473",
+  api_secret: process.env.CLOUDINARY_API_SECRET || process.env.CLOUDINARY_API_SECRET || "",
   secure: true,
 });
 

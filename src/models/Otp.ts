@@ -27,7 +27,7 @@ const otpSchema = new Schema<IOtp>(
     },
     tempUserData: {
       name: { type: String, required: true },
-      password: { type: String, required: true },
+      password: { type: String, default: "" },
       phone: { type: String },
     },
     attempts: {

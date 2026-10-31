@@ -4,8 +4,9 @@ import {
   getOrders,
   getOrderByIdOrNumber,
   updateOrderStatus,
+  deleteOrder,
 } from "../controllers/orderController.js";
-import { authenticate, requireAdmin } from "../middleware/auth.js";
+import { authenticate, authenticateOptional, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -19,22 +20,13 @@ const adminAuth = (req: any, res: any, next: any) => {
   next();
 };
 
-// Create order (can be guest or authenticated user)
-router.post("/", (req, res, next) => {
-  if (req.headers.authorization) {
-    return authenticate(req, res, next);
-  }
-  next();
-}, createOrder);
+// Create order - requires authentication
+router.post("/", authenticate, createOrder);
 
-// Get user/admin orders (or all orders in dev/guest mode)
-router.get("/", (req, res, next) => {
-  if (req.headers.authorization) {
-    return authenticate(req, res, next);
-  }
-  next();
-}, getOrders);
+// Get user/admin orders (uses authenticateOptional so expired tokens don't crash admin portal)
+router.get("/", authenticateOptional, getOrders);
 router.get("/:identifier", getOrderByIdOrNumber);
 router.put("/:id/status", adminAuth, updateOrderStatus);
+router.delete("/:id", adminAuth, deleteOrder);
 
 export default router;

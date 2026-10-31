@@ -12,6 +12,14 @@ export interface IOrderItem {
   weightKg?: number;
 }
 
+export interface IShiprocketActivity {
+  date?: string;
+  status?: string;
+  activity?: string;
+  location?: string;
+  srStatus?: string;
+}
+
 export interface IShiprocketDetails {
   orderId?: number;
   shipmentId?: number;
@@ -25,7 +33,10 @@ export interface IShiprocketDetails {
   trackingUrl?: string;
   status?: string;
   statusCode?: number;
+  currentLocation?: string;
+  etd?: string;
   lastTrackedAt?: Date;
+  activities?: IShiprocketActivity[];
 }
 
 export interface IOrder extends Document {
@@ -38,6 +49,7 @@ export interface IOrder extends Document {
   discount: number;
   total: number;
   totalAmount?: number;
+  deliveryMethod?: "courier" | "porter";
   paymentMethod: "Razorpay" | "Cash on Delivery";
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
@@ -61,6 +73,17 @@ const orderItemSchema = new Schema<IOrderItem>({
   weightKg: { type: Number, default: 0.5 },
 });
 
+const shiprocketActivitySchema = new Schema<IShiprocketActivity>(
+  {
+    date: { type: String },
+    status: { type: String },
+    activity: { type: String },
+    location: { type: String },
+    srStatus: { type: String },
+  },
+  { _id: false }
+);
+
 const shiprocketDetailsSchema = new Schema<IShiprocketDetails>({
   orderId: { type: Number },
   shipmentId: { type: Number },
@@ -74,7 +97,10 @@ const shiprocketDetailsSchema = new Schema<IShiprocketDetails>({
   trackingUrl: { type: String },
   status: { type: String, default: "NEW" },
   statusCode: { type: Number },
+  currentLocation: { type: String },
+  etd: { type: String },
   lastTrackedAt: { type: Date },
+  activities: [shiprocketActivitySchema],
 });
 
 const orderSchema = new Schema<IOrder>(
@@ -97,6 +123,7 @@ const orderSchema = new Schema<IOrder>(
     discount: { type: Number, default: 0 },
     total: { type: Number, required: true },
     totalAmount: { type: Number },
+    deliveryMethod: { type: String, enum: ["courier", "porter"], default: "courier" },
     paymentMethod: { type: String, enum: ["Razorpay", "Cash on Delivery"], default: "Razorpay" },
     razorpayOrderId: { type: String, index: true },
     razorpayPaymentId: { type: String, index: true },

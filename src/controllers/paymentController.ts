@@ -5,7 +5,8 @@ import { Payment } from "../models/Payment.js";
 import { Product } from "../models/Product.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { RazorpayService } from "../services/razorpayService.js";
-import { sendShopOwnerNotification } from "../services/whatsappService.js";
+import { ShiprocketService } from "../services/shiprocketService.js";
+import { sendShopOwnerNotification, sendCustomerNotification } from "../services/whatsappService.js";
 import { config } from "../config/env.js";
 
 /**
@@ -15,6 +16,14 @@ import { config } from "../config/env.js";
  */
 export const createPaymentOrder = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required. Please log in to your account to place an order.",
+      });
+      return;
+    }
+
     const { items, shippingAddress, deliveryMethod, notes } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -86,8 +95,27 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response, next: 
       });
     }
 
-    // Delivery fee rule: Free delivery over ₹999
-    const deliveryFee = subtotal >= 999 ? 0 : 99;
+    const totalWeightKg = verifiedItems.reduce(
+      (sum, item) => sum + (Number(item.weightKg) || 0.5) * item.quantity,
+      0
+    );
+
+    let deliveryFee = 0;
+    if (deliveryMethod === "porter") {
+      // Porter delivery is handled manually by store team; charges are extra (payable directly on delivery)
+      deliveryFee = 0;
+    } else {
+      // Standard Courier: All orders charged via Shiprocket rate (or weight-tiered fallback)
+      if (typeof req.body.deliveryFee === "number" && req.body.deliveryFee > 0) {
+        deliveryFee = Math.round(req.body.deliveryFee);
+      } else if (totalWeightKg <= 0.5) {
+        deliveryFee = 60;
+      } else if (totalWeightKg <= 1.0) {
+        deliveryFee = 90;
+      } else {
+        deliveryFee = Math.round(90 + Math.ceil(totalWeightKg - 1.0) * 45);
+      }
+    }
     const discount = 0;
     const total = subtotal + deliveryFee - discount;
     const totalAmount = total;
@@ -117,7 +145,7 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response, next: 
       paymentMethod: "Razorpay",
       paymentStatus: "PENDING",
       orderStatus: "CREATED",
-      notes: notes || (deliveryMethod === "porter" ? "Porter Express" : "Standard Courier"),
+      notes: notes || (deliveryMethod === "porter" ? "Porter Express (Delivery charges extra / pay on delivery)" : "Standard Courier"),
     });
 
     // Create Razorpay Order with amount in paise
@@ -271,18 +299,69 @@ export const verifyPayment = async (req: Request, res: Response, next: NextFunct
       }
     }
 
-    // Send WhatsApp notification to shop owner ONLY after successful payment confirmation
+    // Automatically push Courier orders to Shiprocket upon confirmed payment
+    if (order.deliveryMethod !== "porter") {
+      try {
+        const orderItems = order.items.map((item) => ({
+          name: item.name,
+          sku: item.slug || item.productId.toString(),
+          units: item.quantity,
+          selling_price: item.price,
+        }));
+
+        const totalWeight = order.items.reduce(
+          (sum, item) => sum + (item.weightKg || 0.5) * item.quantity,
+          0
+        );
+
+        const shiprocketResponse = await ShiprocketService.createOrder({
+          order_id: order.orderNumber,
+          order_date: new Date(order.createdAt).toISOString().replace("T", " ").substring(0, 19),
+          billing_customer_name: order.shippingAddress.fullName,
+          billing_address: `${order.shippingAddress.houseBuilding || ""}, ${order.shippingAddress.street || ""}`.trim() || order.shippingAddress.city || "Kerala",
+          billing_city: order.shippingAddress.city || "Kochi",
+          billing_pincode: order.shippingAddress.pincode,
+          billing_state: order.shippingAddress.state || "Kerala",
+          billing_email: order.shippingAddress.email || "customer@aquapets.in",
+          billing_phone: order.shippingAddress.phone,
+          shipping_is_billing: true,
+          order_items: orderItems,
+          payment_method: "Prepaid",
+          sub_total: order.total,
+          weight: totalWeight || 0.5,
+        });
+
+        if (shiprocketResponse && shiprocketResponse.order_id) {
+          order.shiprocket.orderId = shiprocketResponse.order_id;
+          order.shiprocket.shipmentId = shiprocketResponse.shipment_id;
+          order.shiprocket.status = shiprocketResponse.status || "PROCESSING";
+          await order.save();
+          console.log(`✅ Order ${order.orderNumber} successfully pushed to Shiprocket (ID: ${shiprocketResponse.order_id})`);
+        }
+      } catch (srErr: any) {
+        console.warn("⚠️ Shiprocket auto-sync notice:", srErr.response?.data?.message || srErr.message);
+      }
+    }
+
+    // Send automated WhatsApp notifications to shop owner and customer
     try {
-      await sendShopOwnerNotification({
+      const waPayload = {
         orderNumber: order.orderNumber,
         customerName: order.shippingAddress.fullName,
         customerPhone: order.shippingAddress.phone,
         shippingAddress: order.shippingAddress,
         items: order.items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })),
+        subtotal: order.subtotal,
+        deliveryFee: order.deliveryFee,
         total: order.total,
         paymentMethod: `Razorpay (Paid #${razorpayPaymentId})`,
+        deliveryMethod: order.deliveryMethod,
         notes: order.notes,
-      });
+      };
+      await Promise.allSettled([
+        sendShopOwnerNotification(waPayload),
+        sendCustomerNotification(waPayload),
+      ]);
     } catch (waErr) {
       console.warn("WhatsApp notification error:", waErr);
     }
@@ -341,8 +420,8 @@ export const handleRazorpayWebhook = async (req: Request, res: Response, next: N
             });
           }
 
-          // WhatsApp alert
-          await sendShopOwnerNotification({
+          // WhatsApp alerts to shop owner and customer
+          const waPayload = {
             orderNumber: order.orderNumber,
             customerName: order.shippingAddress.fullName,
             customerPhone: order.shippingAddress.phone,
@@ -350,8 +429,13 @@ export const handleRazorpayWebhook = async (req: Request, res: Response, next: N
             items: order.items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })),
             total: order.total,
             paymentMethod: `Razorpay Webhook (Paid #${rzpPaymentId || ""})`,
+            deliveryMethod: order.deliveryMethod,
             notes: order.notes,
-          });
+          };
+          await Promise.allSettled([
+            sendShopOwnerNotification(waPayload),
+            sendCustomerNotification(waPayload),
+          ]);
         }
       }
     }

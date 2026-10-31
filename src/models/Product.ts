@@ -54,7 +54,8 @@ const productSchema = new Schema<IProduct>(
     stock: { type: Number, required: true, default: 0, min: 0 },
     badge: {
       type: String,
-      enum: ["Best Seller", "Sale", "New", "Popular", "Combo", "Top Pick", null, ""],
+      trim: true,
+      default: "",
     },
     specifications: [
       {

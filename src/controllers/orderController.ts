@@ -5,9 +5,18 @@ import { Product } from "../models/Product.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { RazorpayService } from "../services/razorpayService.js";
 import { sendShopOwnerNotification } from "../services/whatsappService.js";
+import { isErnakulamPincode } from "../utils/pincode.js";
 
 export const createOrder = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required. Please log in to your account to place an order.",
+      });
+      return;
+    }
+
     const { items, shippingAddress, paymentMethod = "Razorpay", notes } = req.body;
 
     if (!items || items.length === 0) {
@@ -71,6 +80,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         productId: product._id,
         slug: product.slug,
         name: product.name,
+        category: product.category,
         image: product.images[0] || "",
         price: product.price,
         quantity: item.quantity,
@@ -79,7 +89,51 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       });
     }
 
-    const deliveryFee = subtotal >= 999 ? 0 : 99; // Free delivery over ₹999
+    // Check if any item belongs to the restricted "Aquariums & Tanks" category
+    const hasTankItem = verifiedItems.some(
+      (item: any) => item.category === "aquariums-tanks"
+    );
+
+    const fullAddr = `${shippingAddress.houseBuilding || ""} ${shippingAddress.street || ""} ${shippingAddress.city || ""}`;
+    const isLocalZone = await isErnakulamPincode(shippingAddress.pincode, fullAddr);
+
+    if (hasTankItem && !isLocalZone) {
+      res.status(400).json({
+        success: false,
+        message:
+          "Fragile Glass Tank Policy: Glass aquarium tanks are only available for local delivery in Ernakulam / Kochi (pincodes 682xxx / 683xxx) via Porter to prevent transit damage. Please update your delivery address or remove the tank.",
+      });
+      return;
+    }
+
+    const resolvedDeliveryMethod: "courier" | "porter" = hasTankItem
+      ? "porter"
+      : (isLocalZone && req.body.deliveryMethod === "porter")
+      ? "porter"
+      : (req.body.deliveryMethod as "courier" | "porter") || "courier";
+
+    const totalWeightKg = verifiedItems.reduce(
+      (sum, item) => sum + (Number(item.weightKg) || 0.5) * item.quantity,
+      0
+    );
+
+    let deliveryFee = 0;
+    if (resolvedDeliveryMethod === "porter") {
+      // Porter delivery is handled manually by store team; charges are extra (payable directly on delivery)
+      deliveryFee = 0;
+    } else {
+      // Standard Courier: All orders charged via Shiprocket live rate (or weight-tiered fallback)
+      if (typeof req.body.deliveryFee === "number" && req.body.deliveryFee > 0) {
+        deliveryFee = Math.round(req.body.deliveryFee);
+      } else if (totalWeightKg <= 0.5) {
+        deliveryFee = 60;
+      } else if (totalWeightKg <= 1.0) {
+        deliveryFee = 90;
+      } else {
+        deliveryFee = Math.round(90 + Math.ceil(totalWeightKg - 1.0) * 45);
+      }
+    }
+
     const discount = 0;
     const total = subtotal + deliveryFee - discount;
 
@@ -94,6 +148,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       deliveryFee,
       discount,
       total,
+      deliveryMethod: resolvedDeliveryMethod,
       paymentMethod,
       paymentStatus: "Pending",
       orderStatus: "Placed",
@@ -120,15 +175,18 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       }
     }
 
-    // Generate & Dispatch Automated Shop Owner Notification (916238392582)
+    // Generate & Dispatch Automated Shop Owner Notification
     const shopOwnerWhatsappUrl = await sendShopOwnerNotification({
       orderNumber: order.orderNumber,
       customerName: shippingAddress.fullName,
       customerPhone: shippingAddress.phone,
       shippingAddress,
       items: verifiedItems.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })),
+      subtotal,
+      deliveryFee,
       total,
       paymentMethod,
+      deliveryMethod: resolvedDeliveryMethod,
       notes,
     });
 
@@ -148,17 +206,43 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
 
 export const getOrders = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const query: Record<string, any> = {};
+    const origin = req.headers.origin || req.headers.referer || "";
+    const isFromAdminPortal = origin.includes(":3001") || origin.includes("admin.");
 
-    // If customer, only show their orders
-    if (req.user && req.user.role !== "admin") {
-      query.userId = req.user._id;
+    // 1. If requested from Admin Panel or by an admin user -> return ALL orders
+    if (isFromAdminPortal || (req.user && req.user.role === "admin")) {
+      const orders = await Order.find({}).sort({ createdAt: -1 });
+      res.json({
+        success: true,
+        data: orders,
+      });
+      return;
     }
 
-    const orders = await Order.find(query).sort({ createdAt: -1 });
+    // 2. If authenticated customer from storefront -> return only their orders
+    if (req.user) {
+      const orders = await Order.find({ userId: req.user._id }).sort({ createdAt: -1 });
+      res.json({
+        success: true,
+        data: orders,
+      });
+      return;
+    }
+
+    // 3. Fallback for development mode
+    if (process.env.NODE_ENV !== "production") {
+      const orders = await Order.find({}).sort({ createdAt: -1 });
+      res.json({
+        success: true,
+        data: orders,
+      });
+      return;
+    }
+
+    // 4. Unauthenticated guest customer storefront session
     res.json({
       success: true,
-      data: orders,
+      data: [],
     });
   } catch (error) {
     next(error);
@@ -196,7 +280,11 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
     if (orderStatus) updateData.orderStatus = orderStatus;
     if (paymentStatus) updateData.paymentStatus = paymentStatus;
 
-    const order = await Order.findByIdAndUpdate(id, updateData, { new: true });
+    const orderIdStr = String(id);
+    const isMongoId = orderIdStr.match(/^[0-9a-fA-F]{24}$/);
+    const filter = isMongoId ? { _id: orderIdStr } : { orderNumber: orderIdStr };
+
+    const order = await Order.findOneAndUpdate(filter, updateData, { new: true });
     if (!order) {
       res.status(404).json({ success: false, message: "Order not found" });
       return;
@@ -211,3 +299,27 @@ export const updateOrderStatus = async (req: Request, res: Response, next: NextF
     next(error);
   }
 };
+
+export const deleteOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const orderIdStr = String(id);
+    const isMongoId = orderIdStr.match(/^[0-9a-fA-F]{24}$/);
+    const filter = isMongoId ? { _id: orderIdStr } : { orderNumber: orderIdStr };
+
+    const order = await Order.findOneAndDelete(filter);
+    if (!order) {
+      res.status(404).json({ success: false, message: "Order not found" });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: "Order removed successfully",
+      data: { id: order._id, orderNumber: order.orderNumber },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

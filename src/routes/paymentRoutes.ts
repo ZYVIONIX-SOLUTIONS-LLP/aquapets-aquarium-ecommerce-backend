@@ -5,11 +5,11 @@ import {
   handleRazorpayWebhook,
   getPaymentStatus,
 } from "../controllers/paymentController.js";
-import { authenticateOptional } from "../middleware/auth.js";
+import { authenticate } from "../middleware/auth.js";
 
 const router = Router();
 
-router.post("/create-order", authenticateOptional, createPaymentOrder);
+router.post("/create-order", authenticate, createPaymentOrder);
 router.post("/verify", verifyPayment);
 router.post("/webhook", handleRazorpayWebhook);
 router.get("/status/:orderId", getPaymentStatus);

@@ -18,6 +18,14 @@ export class ShiprocketService {
   private static tokenExpiresAt: number = 0;
 
   /**
+   * Reset in-memory token cache
+   */
+  static clearToken(): void {
+    this.token = null;
+    this.tokenExpiresAt = 0;
+  }
+
+  /**
    * Authenticate and get cached JWT token for Shiprocket API
    */
   static async getToken(): Promise<string> {
@@ -108,9 +116,15 @@ export class ShiprocketService {
     weight: number;
   }) {
     const headers = await this.getAuthHeaders();
+    const nameParts = (orderPayload.billing_customer_name || "Customer").trim().split(/\s+/);
+    const firstName = nameParts[0] || "Customer";
+    const lastName = nameParts.slice(1).join(" ") || orderPayload.billing_last_name || "User";
+
     const payload = {
       ...orderPayload,
-      pickup_location: orderPayload.pickup_location || config.shiprocket.pickupLocation,
+      billing_customer_name: firstName,
+      billing_last_name: lastName,
+      pickup_location: orderPayload.pickup_location || config.shiprocket.pickupLocation || "work",
       billing_country: orderPayload.billing_country || "India",
       shipping_is_billing: true,
       length: orderPayload.length || 10,

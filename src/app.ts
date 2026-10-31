@@ -9,18 +9,37 @@ import { config } from "./config/env.js";
 
 const app = express();
 
+// Trust reverse proxy (Essential for Nginx on Hostinger VPS)
+app.set("trust proxy", 1);
+
 // Performance and utility middleware
 app.use(compression());
 app.use(helmet({ crossOriginResourcePolicy: false }));
+
+const allowedOrigins = [
+  config.clientUrl,
+  process.env.ADMIN_URL,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: [
-      config.clientUrl,
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-      "http://localhost:3001",
-      "http://127.0.0.1:3001",
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        process.env.NODE_ENV !== "production" ||
+        origin.includes("localhost") ||
+        origin.includes("127.0.0.1") ||
+        origin.includes("aquapets")
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   })
 );

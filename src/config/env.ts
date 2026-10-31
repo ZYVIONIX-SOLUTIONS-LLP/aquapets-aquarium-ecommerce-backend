@@ -18,6 +18,7 @@ export const config = {
     email: process.env.SHIPROCKET_EMAIL || "",
     password: process.env.SHIPROCKET_PASSWORD || "",
     pickupLocation: process.env.SHIPROCKET_PICKUP_LOCATION || "Primary",
+    webhookSecret: process.env.SHIPROCKET_WEBHOOK_SECRET || "",
   },
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",

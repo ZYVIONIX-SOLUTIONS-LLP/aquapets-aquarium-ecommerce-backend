@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { User } from "../models/User.js";
 import { Otp } from "../models/Otp.js";
-import { sendRegistrationOtpEmail } from "../services/emailService.js";
+import { sendRegistrationOtpEmail, sendPasswordResetOtpEmail } from "../services/emailService.js";
 import { config } from "../config/env.js";
 import { AuthRequest } from "../middleware/auth.js";
 
@@ -267,16 +267,28 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 
 export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const { email, identifier: rawIdentifier, password } = req.body;
+    const identifier = String(email || rawIdentifier || "").trim();
 
-    if (!email || !password) {
-      res.status(400).json({ success: false, message: "Email and password are required" });
+    if (!identifier || !password) {
+      res.status(400).json({ success: false, message: "Email or phone number, and password are required" });
       return;
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select("+password");
+    const isEmail = identifier.includes("@");
+    const query = isEmail
+      ? { email: identifier.toLowerCase() }
+      : {
+          $or: [
+            { phone: identifier },
+            { phone: identifier.replace(/\D/g, "") },
+            { email: identifier.toLowerCase() },
+          ],
+        };
+
+    const user = await User.findOne(query).select("+password");
     if (!user || !(await user.comparePassword(password))) {
-      res.status(401).json({ success: false, message: "Invalid email or password" });
+      res.status(401).json({ success: false, message: "Invalid email/phone or password" });
       return;
     }
 
@@ -311,6 +323,143 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
   }
 };
 
+/**
+ * Step 1 of Password Reset: Request 6-digit OTP to email
+ * POST /api/auth/forgot-password
+ */
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      res.status(400).json({ success: false, message: "Email address is required" });
+      return;
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      res.status(404).json({ success: false, message: "No AquaPets account found with this email" });
+      return;
+    }
+
+    // Rate-limit check: do not spam if requested within last 60 seconds
+    const existingOtp = await Otp.findOne({ email: normalizedEmail });
+    if (existingOtp) {
+      const elapsedMs = Date.now() - existingOtp.createdAt.getTime();
+      if (elapsedMs < 60000) {
+        const waitSec = Math.ceil((60000 - elapsedMs) / 1000);
+        res.status(429).json({
+          success: false,
+          message: `Please wait ${waitSec}s before requesting a new code`,
+          retryAfter: waitSec,
+        });
+        return;
+      }
+      await Otp.deleteMany({ email: normalizedEmail });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    await Otp.create({
+      email: normalizedEmail,
+      otp: otpCode,
+      tempUserData: {
+        name: user.name,
+      },
+    });
+
+    await sendPasswordResetOtpEmail(normalizedEmail, otpCode, user.name);
+
+    res.json({
+      success: true,
+      message: `A 6-digit password reset code has been sent to ${normalizedEmail}`,
+      email: normalizedEmail,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Step 2 of Password Reset: Verify OTP and save new password
+ * POST /api/auth/reset-password
+ */
+export const resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      res.status(400).json({ success: false, message: "Email, reset code, and new password are required" });
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
+      return;
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const otpRecord = await Otp.findOne({ email: normalizedEmail });
+
+    if (!otpRecord) {
+      res.status(400).json({
+        success: false,
+        message: "Reset code expired or not found. Please request a new code.",
+      });
+      return;
+    }
+
+    if (otpRecord.attempts >= 5) {
+      await Otp.deleteMany({ email: normalizedEmail });
+      res.status(400).json({
+        success: false,
+        message: "Too many incorrect attempts. Please request a new code.",
+      });
+      return;
+    }
+
+    if (otpRecord.otp !== otp.toString().trim()) {
+      otpRecord.attempts += 1;
+      await otpRecord.save();
+      const remaining = 5 - otpRecord.attempts;
+      res.status(400).json({
+        success: false,
+        message: `Incorrect reset code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+      });
+      return;
+    }
+
+    // Update user password
+    const user = await User.findOne({ email: normalizedEmail }).select("+password");
+    if (!user) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    await Otp.deleteMany({ email: normalizedEmail });
+
+    const token = generateToken(user._id.toString());
+
+    res.json({
+      success: true,
+      message: "Password reset successfully! You are now signed in.",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        addresses: user.addresses,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getProfile = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     if (!req.user) {
@@ -334,7 +483,41 @@ export const addAddress = async (req: AuthRequest, res: Response, next: NextFunc
       return;
     }
 
-    req.user.addresses.push(req.body);
+    const {
+      fullName,
+      phone,
+      houseBuilding,
+      street,
+      city,
+      state = "Kerala",
+      pincode,
+      addressType = "HOME",
+      isDefault = false,
+      email = req.user.email || "",
+    } = req.body;
+
+    if (!fullName || !phone || !houseBuilding || !street || !city || !pincode) {
+      res.status(400).json({ success: false, message: "All required address fields must be provided" });
+      return;
+    }
+
+    if (isDefault || req.user.addresses.length === 0) {
+      req.user.addresses.forEach((a) => (a.isDefault = false));
+    }
+
+    req.user.addresses.push({
+      fullName: String(fullName).trim(),
+      email: String(email).trim(),
+      phone: String(phone).trim(),
+      houseBuilding: String(houseBuilding).trim(),
+      street: String(street).trim(),
+      city: String(city).trim(),
+      state: String(state).trim(),
+      pincode: String(pincode).trim(),
+      addressType,
+      isDefault: isDefault || req.user.addresses.length === 0,
+    });
+
     await req.user.save();
 
     res.json({
@@ -362,8 +545,21 @@ export const updateAddress = async (req: AuthRequest, res: Response, next: NextF
       return;
     }
 
-    // Update fields in place
-    Object.assign(addr, req.body);
+    if (req.body.isDefault) {
+      req.user.addresses.forEach((a) => (a.isDefault = false));
+    }
+
+    if (req.body.fullName) addr.fullName = String(req.body.fullName).trim();
+    if (req.body.phone) addr.phone = String(req.body.phone).trim();
+    if (req.body.houseBuilding) addr.houseBuilding = String(req.body.houseBuilding).trim();
+    if (req.body.street) addr.street = String(req.body.street).trim();
+    if (req.body.city) addr.city = String(req.body.city).trim();
+    if (req.body.state) addr.state = String(req.body.state).trim();
+    if (req.body.pincode) addr.pincode = String(req.body.pincode).trim();
+    if (req.body.addressType) addr.addressType = req.body.addressType;
+    if (req.body.email !== undefined) addr.email = String(req.body.email).trim();
+    if (req.body.isDefault !== undefined) addr.isDefault = Boolean(req.body.isDefault);
+
     await req.user.save();
 
     res.json({
@@ -384,14 +580,11 @@ export const deleteAddress = async (req: AuthRequest, res: Response, next: NextF
     }
 
     const { addressId } = req.params;
-    const addr = (req.user.addresses as any).id(addressId);
-
-    if (!addr) {
-      res.status(404).json({ success: false, message: "Address not found" });
-      return;
+    const initialLen = req.user.addresses.length;
+    (req.user.addresses as any).pull({ _id: addressId });
+    if (req.user.addresses.length === initialLen) {
+      req.user.addresses = req.user.addresses.filter((a: any) => a._id?.toString() !== addressId);
     }
-
-    addr.deleteOne();
     await req.user.save();
 
     res.json({
