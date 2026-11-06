@@ -28,17 +28,20 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Allow non-browser requests (mobile apps, server-to-server, curl)
       if (!origin) return callback(null, true);
-      if (
+
+      const isAllowed =
         allowedOrigins.includes(origin) ||
         process.env.NODE_ENV !== "production" ||
         origin.includes("localhost") ||
         origin.includes("127.0.0.1") ||
-        origin.includes("aquapets")
-      ) {
+        origin.endsWith("aquapetsaquarium.com");
+
+      if (isAllowed) {
         return callback(null, true);
       }
-      return callback(null, true);
+      return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
     credentials: true,
   })

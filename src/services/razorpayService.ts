@@ -46,12 +46,17 @@ export class RazorpayService {
    * signature = HMAC_SHA256(orderId + "|" + paymentId, secret)
    */
   static verifyPaymentSignature(razorpayOrderId: string, razorpayPaymentId: string, razorpaySignature: string): boolean {
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      return false;
+    }
+
     if (!config.razorpay.keySecret || config.razorpay.keySecret === "YOUR_RAZORPAY_TEST_SECRET") {
-      // In development/test mode without API secret key configured yet,
-      // accept test payment verification from Razorpay test checkout
-      if (razorpayPaymentId) {
+      // Allow only in explicit non-production development
+      if (process.env.NODE_ENV !== "production") {
         return true;
       }
+      console.error("❌ RAZORPAY_KEY_SECRET is not configured in production");
+      return false;
     }
 
     const body = `${razorpayOrderId}|${razorpayPaymentId}`;
@@ -60,20 +65,43 @@ export class RazorpayService {
       .update(body.toString())
       .digest("hex");
 
-    // Check exact HMAC SHA256 match
-    return expectedSignature === razorpaySignature;
+    try {
+      const expectedBuf = Buffer.from(expectedSignature, "hex");
+      const sigBuf = Buffer.from(razorpaySignature, "hex");
+      if (expectedBuf.length !== sigBuf.length) return false;
+      return crypto.timingSafeEqual(expectedBuf, sigBuf);
+    } catch {
+      return expectedSignature === razorpaySignature;
+    }
   }
 
   /**
    * Verify Razorpay Webhook signature
    */
   static verifyWebhookSignature(rawBody: string, webhookSignature: string): boolean {
-    if (!config.razorpay.webhookSecret) return true;
+    if (!webhookSignature) return false;
+
+    if (!config.razorpay.webhookSecret || config.razorpay.webhookSecret === "YOUR_RAZORPAY_WEBHOOK_SECRET") {
+      if (process.env.NODE_ENV !== "production") {
+        return true;
+      }
+      console.error("❌ RAZORPAY_WEBHOOK_SECRET is not configured in production");
+      return false;
+    }
+
     const expectedSignature = crypto
       .createHmac("sha256", config.razorpay.webhookSecret)
       .update(rawBody)
       .digest("hex");
-    return expectedSignature === webhookSignature;
+
+    try {
+      const expectedBuf = Buffer.from(expectedSignature, "hex");
+      const sigBuf = Buffer.from(webhookSignature, "hex");
+      if (expectedBuf.length !== sigBuf.length) return false;
+      return crypto.timingSafeEqual(expectedBuf, sigBuf);
+    } catch {
+      return expectedSignature === webhookSignature;
+    }
   }
 
   /**

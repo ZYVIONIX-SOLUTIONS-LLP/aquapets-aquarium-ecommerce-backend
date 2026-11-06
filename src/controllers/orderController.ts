@@ -206,11 +206,8 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
 
 export const getOrders = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const origin = req.headers.origin || req.headers.referer || "";
-    const isFromAdminPortal = origin.includes(":3001") || origin.includes("admin.");
-
-    // 1. If requested from Admin Panel or by an admin user -> return ALL orders
-    if (isFromAdminPortal || (req.user && req.user.role === "admin")) {
+    // 1. Authenticated Admin -> return ALL orders
+    if (req.user && req.user.role === "admin") {
       const orders = await Order.find({}).sort({ createdAt: -1 });
       res.json({
         success: true,
@@ -219,7 +216,7 @@ export const getOrders = async (req: AuthRequest, res: Response, next: NextFunct
       return;
     }
 
-    // 2. If authenticated customer from storefront -> return only their orders
+    // 2. Authenticated Customer -> return ONLY their orders
     if (req.user) {
       const orders = await Order.find({ userId: req.user._id }).sort({ createdAt: -1 });
       res.json({
@@ -229,17 +226,7 @@ export const getOrders = async (req: AuthRequest, res: Response, next: NextFunct
       return;
     }
 
-    // 3. Fallback for development mode
-    if (process.env.NODE_ENV !== "production") {
-      const orders = await Order.find({}).sort({ createdAt: -1 });
-      res.json({
-        success: true,
-        data: orders,
-      });
-      return;
-    }
-
-    // 4. Unauthenticated guest customer storefront session
+    // 3. Unauthenticated guest customer storefront session -> return empty list
     res.json({
       success: true,
       data: [],

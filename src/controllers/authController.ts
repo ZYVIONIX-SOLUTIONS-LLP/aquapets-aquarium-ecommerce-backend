@@ -618,7 +618,15 @@ export const googleAuth = async (req: Request, res: Response, next: NextFunction
     }
 
     const payload: any = await googleRes.json();
-    const { email, email_verified, name, picture, sub } = payload;
+    const { email, email_verified, name, picture, sub, aud } = payload;
+
+    // Validate Google Client ID Audience to prevent cross-app token reuse
+    const expectedClientId = config.googleClientId || process.env.GOOGLE_CLIENT_ID;
+    if (expectedClientId && aud && aud !== expectedClientId) {
+      console.warn(`⚠️ Google Auth audience mismatch: token aud='${aud}', expected='${expectedClientId}'`);
+      res.status(401).json({ success: false, message: "Unauthorized Google client audience" });
+      return;
+    }
 
     if (!email || (email_verified !== "true" && email_verified !== true)) {
       res.status(400).json({ success: false, message: "Google account email is not verified" });
