@@ -265,6 +265,26 @@ export const register = async (req: Request, res: Response, next: NextFunction):
   }
 };
 
+// In-memory brute-force rate limiter for authentication
+interface LoginAttemptRecord {
+  count: number;
+  lockedUntil?: number;
+  firstFailedAt: number;
+}
+const loginAttempts = new Map<string, LoginAttemptRecord>();
+
+// Periodic cleanup of expired records every 15 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of loginAttempts.entries()) {
+    if (record.lockedUntil && record.lockedUntil < now) {
+      loginAttempts.delete(key);
+    } else if (now - record.firstFailedAt > 30 * 60 * 1000) {
+      loginAttempts.delete(key);
+    }
+  }
+}, 15 * 60 * 1000).unref();
+
 export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { email, identifier: rawIdentifier, password } = req.body;
@@ -272,6 +292,22 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 
     if (!identifier || !password) {
       res.status(400).json({ success: false, message: "Email or phone number, and password are required" });
+      return;
+    }
+
+    // Rate-limiting check by client IP & normalized identifier
+    const clientIp = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || req.ip || "unknown").split(",")[0].trim();
+    const rateLimitKey = `${clientIp}:${identifier.toLowerCase()}`;
+    const attempt = loginAttempts.get(rateLimitKey);
+    const now = Date.now();
+
+    if (attempt && attempt.lockedUntil && attempt.lockedUntil > now) {
+      const remainingMinutes = Math.ceil((attempt.lockedUntil - now) / 60000);
+      res.status(429).json({
+        success: false,
+        message: `Too many failed login attempts. Account access is temporarily locked for security. Please try again in ${remainingMinutes} minute(s).`,
+        retryAfter: Math.ceil((attempt.lockedUntil - now) / 1000),
+      });
       return;
     }
 
@@ -287,10 +323,41 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
         };
 
     const user = await User.findOne(query).select("+password");
-    if (!user || !(await user.comparePassword(password))) {
-      res.status(401).json({ success: false, message: "Invalid email/phone or password" });
+    const isPasswordValid = user ? await user.comparePassword(password) : false;
+
+    if (!user || !isPasswordValid) {
+      const currentAttempt = loginAttempts.get(rateLimitKey) || {
+        count: 0,
+        firstFailedAt: now,
+      };
+
+      currentAttempt.count += 1;
+
+      if (currentAttempt.count >= 5) {
+        currentAttempt.lockedUntil = now + 15 * 60 * 1000; // 15-minute lockout
+        loginAttempts.set(rateLimitKey, currentAttempt);
+
+        res.status(429).json({
+          success: false,
+          message: "Too many failed login attempts. Access is temporarily locked for 15 minutes for your security.",
+          retryAfter: 900,
+        });
+        return;
+      }
+
+      loginAttempts.set(rateLimitKey, currentAttempt);
+      const remaining = 5 - currentAttempt.count;
+
+      res.status(401).json({
+        success: false,
+        message: `Invalid email/phone or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before temporary lockout.`,
+        remainingAttempts: remaining,
+      });
       return;
     }
+
+    // Successful login: clear any failed attempt history
+    loginAttempts.delete(rateLimitKey);
 
     const token = generateToken(user._id.toString());
 
