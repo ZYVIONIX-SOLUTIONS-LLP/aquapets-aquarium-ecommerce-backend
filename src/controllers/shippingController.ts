@@ -553,14 +553,18 @@ export const trackShipment = async (req: Request, res: Response, next: NextFunct
 export const handleShiprocketWebhook = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     // Optional webhook token/secret verification
-    const expectedSecret = config.shiprocket.webhookSecret;
+    const expectedSecret = (config.shiprocket.webhookSecret || "").trim();
     if (expectedSecret) {
-      const incomingSecret =
+      const incomingSecret = String(
         req.headers["x-api-key"] ||
         req.headers["x-shiprocket-secret"] ||
-        req.headers["x-webhook-token"];
+        req.headers["x-webhook-token"] ||
+        ""
+      ).trim();
 
-      const bearerToken = req.headers.authorization && req.headers.authorization.replace(/^Bearer\s+/i, "");
+      const bearerToken = String(
+        (req.headers.authorization && req.headers.authorization.replace(/^Bearer\s+/i, "")) || ""
+      ).trim();
 
       let isAuthorized =
         (incomingSecret && incomingSecret === expectedSecret) ||
@@ -578,6 +582,7 @@ export const handleShiprocketWebhook = async (req: Request, res: Response, next:
         }
       }
 
+      // If token was provided but did not match, reject
       if (!isAuthorized && (incomingSecret || bearerToken)) {
         console.warn("⚠️ Shiprocket webhook unauthorized token attempt:", incomingSecret || bearerToken);
         res.status(401).json({ success: false, message: "Unauthorized webhook token" });
@@ -585,33 +590,48 @@ export const handleShiprocketWebhook = async (req: Request, res: Response, next:
       }
     }
 
-    const payload = Array.isArray(req.body) ? req.body[0] : req.body;
-    if (!payload || typeof payload !== "object") {
-      res.status(400).json({ success: false, message: "Invalid webhook payload body" });
+    const payload = Array.isArray(req.body) ? req.body[0] : (req.body || {});
+
+    // Flexible field extraction for various Shiprocket webhook schemas
+    const awb = String(payload?.awb || payload?.awb_code || payload?.awbCode || payload?.tracking_number || "").trim();
+    const orderId = String(payload?.order_id || payload?.orderNumber || payload?.channel_order_id || payload?.sr_order_id || "").trim();
+    const shipmentId = payload?.shipment_id || payload?.shipmentId;
+    const currentStatus = String(payload?.current_status || payload?.shipment_status || payload?.status || payload?.order_status || "").trim();
+    const currentStatusId = Number(payload?.current_status_id || payload?.status_id) || undefined;
+    const courierName = payload?.courier_name || payload?.courier || payload?.courier_company || "";
+    const location = payload?.location || payload?.current_location || payload?.city || payload?.hub || "";
+    const etd = payload?.etd || payload?.estimated_delivery_date || "";
+    const scans: any[] = payload?.scans || payload?.activities || payload?.shipment_track_activities || [];
+
+    // Handle test ping / empty ping from Shiprocket dashboard verification
+    if (!payload || typeof payload !== "object" || (!awb && !orderId && !shipmentId)) {
+      console.log("📡 Shiprocket Webhook test ping or health check acknowledged successfully");
+      res.status(200).json({
+        success: true,
+        message: "AquaPets Shiprocket Webhook endpoint is active and verified",
+        status: "connected",
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
-    // Flexible field extraction for various Shiprocket webhook schemas
-    const awb = String(payload.awb || payload.awb_code || payload.awbCode || payload.tracking_number || "").trim();
-    const orderId = String(payload.order_id || payload.orderNumber || payload.channel_order_id || payload.sr_order_id || "").trim();
-    const shipmentId = payload.shipment_id || payload.shipmentId;
-    const currentStatus = String(payload.current_status || payload.shipment_status || payload.status || payload.order_status || "").trim();
-    const currentStatusId = Number(payload.current_status_id || payload.status_id) || undefined;
-    const courierName = payload.courier_name || payload.courier || payload.courier_company || "";
-    const location = payload.location || payload.current_location || payload.city || payload.hub || "";
-    const etd = payload.etd || payload.estimated_delivery_date || "";
-    const scans: any[] = payload.scans || payload.activities || payload.shipment_track_activities || [];
-
     console.log(`📡 Shiprocket Webhook received: AWB='${awb}', OrderID='${orderId}', Status='${currentStatus}', Location='${location}'`);
 
-    const order = await Order.findOne({
-      $or: [
-        ...(awb ? [{ "shiprocket.awbCode": awb }] : []),
-        ...(orderId ? [{ orderNumber: orderId }] : []),
-        ...(shipmentId ? [{ "shiprocket.shipmentId": Number(shipmentId) }] : []),
-        ...(/^[0-9a-fA-F]{24}$/.test(orderId) ? [{ _id: orderId }] : []),
-      ],
-    });
+    const queryConditions: any[] = [];
+    if (awb) queryConditions.push({ "shiprocket.awbCode": awb });
+    if (orderId) queryConditions.push({ orderNumber: orderId });
+    if (shipmentId) queryConditions.push({ "shiprocket.shipmentId": Number(shipmentId) });
+    if (/^[0-9a-fA-F]{24}$/.test(orderId)) queryConditions.push({ _id: orderId });
+
+    if (queryConditions.length === 0) {
+      res.status(200).json({
+        success: true,
+        message: "Webhook ping received with no active order criteria",
+      });
+      return;
+    }
+
+    const order = await Order.findOne({ $or: queryConditions });
 
     if (!order) {
       console.warn(`⚠️ Order not found in database for Webhook AWB: ${awb}, OrderID: ${orderId}`);

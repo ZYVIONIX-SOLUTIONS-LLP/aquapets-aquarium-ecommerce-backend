@@ -6,9 +6,14 @@ import {
   updateOrderStatus,
   deleteOrder,
 } from "../controllers/orderController.js";
+import { handleShiprocketWebhook, verifyWebhookEndpoint } from "../controllers/shippingController.js";
 import { authenticate, authenticateOptional, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
+
+// Webhook endpoint (supports both GET verification and POST updates)
+router.get("/webhook", verifyWebhookEndpoint);
+router.post("/webhook", handleShiprocketWebhook);
 
 const adminAuth = (req: any, res: any, next: any) => {
   if (req.headers.authorization) {
