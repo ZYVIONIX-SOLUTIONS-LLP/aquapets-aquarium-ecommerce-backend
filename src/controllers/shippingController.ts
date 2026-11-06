@@ -161,6 +161,15 @@ export const createShipmentOrder = async (req: Request, res: Response, next: Nex
       return;
     }
 
+    const isPaid = order.paymentStatus === "PAID" || order.paymentStatus === "Paid" || order.paymentMethod === "Cash on Delivery";
+    if (!isPaid) {
+      res.status(400).json({
+        success: false,
+        message: "Cannot create shipment: Order payment is PENDING or UNPAID. Only verified paid orders can be fulfilled.",
+      });
+      return;
+    }
+
     const orderItems = order.items.map((item) => ({
       name: item.name,
       sku: item.slug || item.productId.toString(),

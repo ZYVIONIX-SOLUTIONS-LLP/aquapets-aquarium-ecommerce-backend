@@ -216,9 +216,15 @@ export const getOrders = async (req: AuthRequest, res: Response, next: NextFunct
       return;
     }
 
-    // 2. Authenticated Customer -> return ONLY their orders
+    // 2. Authenticated Customer -> return ONLY their confirmed/paid orders
     if (req.user) {
-      const orders = await Order.find({ userId: req.user._id }).sort({ createdAt: -1 });
+      const orders = await Order.find({
+        userId: req.user._id,
+        $or: [
+          { paymentStatus: { $in: ["PAID", "Paid"] } },
+          { paymentMethod: "Cash on Delivery" },
+        ],
+      }).sort({ createdAt: -1 });
       res.json({
         success: true,
         data: orders,

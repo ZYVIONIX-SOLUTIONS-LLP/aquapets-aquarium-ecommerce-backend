@@ -490,3 +490,44 @@ export const getPaymentStatus = async (req: Request, res: Response, next: NextFu
     next(error);
   }
 };
+
+/**
+ * 5. Cancel or Abandon a Pending Payment Order
+ */
+export const cancelPendingOrder = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { orderId } = req.body;
+    if (!orderId) {
+      res.status(400).json({ success: false, message: "orderId is required" });
+      return;
+    }
+
+    const order = await Order.findOne({
+      $or: [
+        { _id: typeof orderId === "string" && orderId.match(/^[0-9a-fA-F]{24}$/) ? orderId : null },
+        { orderNumber: orderId },
+        { razorpayOrderId: orderId },
+      ],
+    });
+
+    if (!order) {
+      res.status(404).json({ success: false, message: "Order not found" });
+      return;
+    }
+
+    // Only allow cancelling if still PENDING / CREATED
+    if (order.paymentStatus === "PENDING" || order.paymentStatus === "Pending") {
+      order.paymentStatus = "FAILED";
+      order.orderStatus = "CANCELLED";
+      await order.save();
+    }
+
+    res.json({
+      success: true,
+      message: "Order marked as cancelled/abandoned",
+      data: { orderId: order._id, orderNumber: order.orderNumber, paymentStatus: order.paymentStatus, orderStatus: order.orderStatus },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
