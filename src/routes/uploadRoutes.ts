@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { uploadImage, uploadMultipleImages, deleteImage } from "../controllers/uploadController.js";
-import { authenticate } from "../middleware/auth.js";
+import { authenticate, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -21,9 +21,9 @@ const upload = multer({
   },
 });
 
-// Routes
-router.post("/", upload.single("image"), uploadImage);
-router.post("/multiple", upload.array("images", 10), uploadMultipleImages);
-router.delete("/", deleteImage);
+// Admin-Only Routes for uploading and deleting images
+router.post("/", authenticate, requireAdmin, upload.single("image"), uploadImage);
+router.post("/multiple", authenticate, requireAdmin, upload.array("images", 10), uploadMultipleImages);
+router.delete("/", authenticate, requireAdmin, deleteImage);
 
 export default router;
