@@ -161,7 +161,7 @@ export const createShipmentOrder = async (req: Request, res: Response, next: Nex
       return;
     }
 
-    const isPaid = order.paymentStatus === "PAID" || order.paymentStatus === "Paid" || order.paymentMethod === "Cash on Delivery";
+    const isPaid = order.paymentStatus === "PAID" || order.paymentStatus === "Paid";
     if (!isPaid) {
       res.status(400).json({
         success: false,
@@ -191,7 +191,7 @@ export const createShipmentOrder = async (req: Request, res: Response, next: Nex
       billing_phone: order.shippingAddress.phone,
       shipping_is_billing: true,
       order_items: orderItems,
-      payment_method: order.paymentMethod === "Cash on Delivery" ? "COD" : "Prepaid",
+      payment_method: "Prepaid",
       sub_total: order.total,
       weight: totalWeight || 0.5,
     });

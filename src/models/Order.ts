@@ -50,7 +50,7 @@ export interface IOrder extends Document {
   total: number;
   totalAmount?: number;
   deliveryMethod?: "courier" | "porter";
-  paymentMethod: "Razorpay" | "Cash on Delivery";
+  paymentMethod: "Razorpay";
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
@@ -124,7 +124,7 @@ const orderSchema = new Schema<IOrder>(
     total: { type: Number, required: true },
     totalAmount: { type: Number },
     deliveryMethod: { type: String, enum: ["courier", "porter"], default: "courier" },
-    paymentMethod: { type: String, enum: ["Razorpay", "Cash on Delivery"], default: "Razorpay" },
+    paymentMethod: { type: String, enum: ["Razorpay"], default: "Razorpay" },
     razorpayOrderId: { type: String, index: true },
     razorpayPaymentId: { type: String, index: true },
     razorpaySignature: { type: String },

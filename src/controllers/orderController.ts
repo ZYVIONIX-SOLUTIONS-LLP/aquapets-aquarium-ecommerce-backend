@@ -220,10 +220,7 @@ export const getOrders = async (req: AuthRequest, res: Response, next: NextFunct
     if (req.user) {
       const orders = await Order.find({
         userId: req.user._id,
-        $or: [
-          { paymentStatus: { $in: ["PAID", "Paid"] } },
-          { paymentMethod: "Cash on Delivery" },
-        ],
+        paymentStatus: { $in: ["PAID", "Paid"] },
       }).sort({ createdAt: -1 });
       res.json({
         success: true,

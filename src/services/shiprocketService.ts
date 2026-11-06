@@ -108,7 +108,7 @@ export class ShiprocketService {
       selling_price: number;
       discount?: number;
     }>;
-    payment_method: "Prepaid" | "COD";
+    payment_method: "Prepaid";
     sub_total: number;
     length?: number;
     breadth?: number;
