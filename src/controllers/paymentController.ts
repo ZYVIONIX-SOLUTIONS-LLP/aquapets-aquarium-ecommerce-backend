@@ -455,7 +455,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response, next: N
  * 4. GET /api/payment/status/:orderId
  * Returns current payment & order status for polling / reconnection recovery.
  */
-export const getPaymentStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getPaymentStatus = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { orderId } = req.params;
 
@@ -470,6 +470,25 @@ export const getPaymentStatus = async (req: Request, res: Response, next: NextFu
     if (!order) {
       res.status(404).json({ success: false, message: "Order not found" });
       return;
+    }
+
+    // Privacy & IDOR Protection:
+    // If not authenticated as the order owner or admin, return only high-level status without sensitive address
+    if (order.userId) {
+      const isOwner = req.user && String(order.userId) === String(req.user._id);
+      const isAdmin = req.user && req.user.role === "admin";
+      if (!isOwner && !isAdmin) {
+        res.json({
+          success: true,
+          data: {
+            orderId: order._id,
+            orderNumber: order.orderNumber,
+            paymentStatus: order.paymentStatus,
+            orderStatus: order.orderStatus,
+          },
+        });
+        return;
+      }
     }
 
     res.json({
@@ -513,6 +532,20 @@ export const cancelPendingOrder = async (req: AuthRequest, res: Response, next: 
     if (!order) {
       res.status(404).json({ success: false, message: "Order not found" });
       return;
+    }
+
+    // Ownership check (IDOR Protection):
+    // Only the customer who created the order or a store admin can cancel it
+    if (order.userId) {
+      const isOwner = req.user && String(order.userId) === String(req.user._id);
+      const isAdmin = req.user && req.user.role === "admin";
+      if (!isOwner && !isAdmin) {
+        res.status(403).json({
+          success: false,
+          message: "Forbidden: You do not have permission to modify this order",
+        });
+        return;
+      }
     }
 
     // Only allow cancelling if still PENDING / CREATED
