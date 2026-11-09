@@ -18,6 +18,48 @@ export interface PhoneValidationResult {
   cleanPhone?: string;
 }
 
+export interface NameValidationResult {
+  isValid: boolean;
+  error?: string;
+  cleanName?: string;
+}
+
+/**
+ * Validates a customer's Full Name.
+ * - Must not be empty
+ * - Must be between 2 and 60 characters
+ * - Only letters/alphabets and spaces allowed (no digits, no special characters like @, #, $, %, etc.)
+ */
+export function validateFullName(rawName?: string | null): NameValidationResult {
+  if (rawName === undefined || rawName === null) {
+    return { isValid: false, error: "Full name is required" };
+  }
+
+  const trimmed = String(rawName).trim();
+  if (!trimmed) {
+    return { isValid: false, error: "Full name cannot be empty" };
+  }
+
+  if (trimmed.length < 2) {
+    return { isValid: false, error: "Full name must be at least 2 characters long" };
+  }
+
+  if (trimmed.length > 60) {
+    return { isValid: false, error: "Full name cannot exceed 60 characters" };
+  }
+
+  // Only letters and spaces allowed
+  if (!/^[a-zA-Z\s]+$/.test(trimmed)) {
+    return {
+      isValid: false,
+      error: "Full name must only contain letters/alphabets and spaces. Numbers and special characters are not allowed.",
+    };
+  }
+
+  const cleanName = trimmed.replace(/\s+/g, " ");
+  return { isValid: true, cleanName };
+}
+
 export function validatePhoneNumber(
   rawPhone?: string | null,
   isRequired: boolean = false
@@ -105,3 +147,4 @@ export function validatePhoneNumber(
 
   return { isValid: true, cleanPhone: digits };
 }
+

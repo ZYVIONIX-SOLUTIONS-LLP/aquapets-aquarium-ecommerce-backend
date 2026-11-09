@@ -5,7 +5,7 @@ import { Otp } from "../models/Otp.js";
 import { sendRegistrationOtpEmail, sendPasswordResetOtpEmail } from "../services/emailService.js";
 import { config } from "../config/env.js";
 import { AuthRequest } from "../middleware/auth.js";
-import { validatePhoneNumber } from "../utils/phone.js";
+import { validatePhoneNumber, validateFullName } from "../utils/phone.js";
 
 const generateToken = (id: string): string => {
   return jwt.sign({ id }, config.jwtSecret, { expiresIn: config.jwtExpiresIn as any });
@@ -21,6 +21,13 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
 
     if (!name || !email || !password) {
       res.status(400).json({ success: false, message: "Name, email, and password are required" });
+      return;
+    }
+
+    // Validate full name (letters and spaces only)
+    const nameValidation = validateFullName(name);
+    if (!nameValidation.isValid) {
+      res.status(400).json({ success: false, message: nameValidation.error });
       return;
     }
 
@@ -69,14 +76,14 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
       email: normalizedEmail,
       otp: otpCode,
       tempUserData: {
-        name: name.trim(),
+        name: nameValidation.cleanName!,
         password,
         phone: phoneValidation.cleanPhone,
       },
     });
 
     // Send the email (or log in terminal if SMTP not yet configured)
-    await sendRegistrationOtpEmail(normalizedEmail, otpCode, name.trim());
+    await sendRegistrationOtpEmail(normalizedEmail, otpCode, nameValidation.cleanName!);
 
     res.status(200).json({
       success: true,
@@ -229,6 +236,13 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       return;
     }
 
+    // Validate full name (letters and spaces only)
+    const nameValidation = validateFullName(name);
+    if (!nameValidation.isValid) {
+      res.status(400).json({ success: false, message: nameValidation.error });
+      return;
+    }
+
     if (password.length < 6) {
       res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
       return;
@@ -247,7 +261,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     }
 
     const user = await User.create({
-      name,
+      name: nameValidation.cleanName!,
       email: email.toLowerCase(),
       password,
       phone: phoneValidation.cleanPhone,
@@ -587,6 +601,12 @@ export const addAddress = async (req: AuthRequest, res: Response, next: NextFunc
       return;
     }
 
+    const nameValidation = validateFullName(fullName);
+    if (!nameValidation.isValid) {
+      res.status(400).json({ success: false, message: nameValidation.error });
+      return;
+    }
+
     const phoneValidation = validatePhoneNumber(phone, true);
     if (!phoneValidation.isValid) {
       res.status(400).json({ success: false, message: phoneValidation.error });
@@ -598,7 +618,7 @@ export const addAddress = async (req: AuthRequest, res: Response, next: NextFunc
     }
 
     req.user.addresses.push({
-      fullName: String(fullName).trim(),
+      fullName: nameValidation.cleanName!,
       email: String(email).trim(),
       phone: phoneValidation.cleanPhone!,
       houseBuilding: String(houseBuilding).trim(),
@@ -641,7 +661,14 @@ export const updateAddress = async (req: AuthRequest, res: Response, next: NextF
       req.user.addresses.forEach((a) => (a.isDefault = false));
     }
 
-    if (req.body.fullName) addr.fullName = String(req.body.fullName).trim();
+    if (req.body.fullName) {
+      const nameValidation = validateFullName(req.body.fullName);
+      if (!nameValidation.isValid) {
+        res.status(400).json({ success: false, message: nameValidation.error });
+        return;
+      }
+      addr.fullName = nameValidation.cleanName!;
+    }
     if (req.body.phone) {
       const phoneValidation = validatePhoneNumber(req.body.phone, true);
       if (!phoneValidation.isValid) {
