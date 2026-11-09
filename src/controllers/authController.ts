@@ -5,6 +5,7 @@ import { Otp } from "../models/Otp.js";
 import { sendRegistrationOtpEmail, sendPasswordResetOtpEmail } from "../services/emailService.js";
 import { config } from "../config/env.js";
 import { AuthRequest } from "../middleware/auth.js";
+import { validatePhoneNumber } from "../utils/phone.js";
 
 const generateToken = (id: string): string => {
   return jwt.sign({ id }, config.jwtSecret, { expiresIn: config.jwtExpiresIn as any });
@@ -23,29 +24,15 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
       return;
     }
 
-    const cleanName = (name || "").trim();
-    if (!/^[A-Za-z\s.'-]+$/.test(cleanName) || cleanName.replace(/[^A-Za-z]/g, "").length < 2) {
-      res.status(400).json({
-        success: false,
-        message: "Full name should only contain letters and spaces (minimum 2 characters).",
-      });
+    if (password.length < 6) {
+      res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
       return;
     }
 
-    if (phone && phone.trim()) {
-      const cleanPhone = phone.replace(/\D/g, "");
-      const isRepeating = /^(\d)\1{9}$/.test(cleanPhone);
-      if (!/^[6-9]\d{9}$/.test(cleanPhone) || isRepeating) {
-        res.status(400).json({
-          success: false,
-          message: "Please enter a valid 10-digit mobile number.",
-        });
-        return;
-      }
-    }
-
-    if (password.length < 6) {
-      res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    // Validate phone number if provided (phone is optional)
+    const phoneValidation = validatePhoneNumber(phone, false);
+    if (!phoneValidation.isValid) {
+      res.status(400).json({ success: false, message: phoneValidation.error });
       return;
     }
 
@@ -84,7 +71,7 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
       tempUserData: {
         name: name.trim(),
         password,
-        phone: phone ? phone.trim() : undefined,
+        phone: phoneValidation.cleanPhone,
       },
     });
 
@@ -242,25 +229,15 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       return;
     }
 
-    const cleanName = (name || "").trim();
-    if (!/^[A-Za-z\s.'-]+$/.test(cleanName) || cleanName.replace(/[^A-Za-z]/g, "").length < 2) {
-      res.status(400).json({
-        success: false,
-        message: "Full name should only contain letters and spaces (minimum 2 characters).",
-      });
+    if (password.length < 6) {
+      res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
       return;
     }
 
-    if (phone && phone.trim()) {
-      const cleanPhone = phone.replace(/\D/g, "");
-      const isRepeating = /^(\d)\1{9}$/.test(cleanPhone);
-      if (!/^[6-9]\d{9}$/.test(cleanPhone) || isRepeating) {
-        res.status(400).json({
-          success: false,
-          message: "Please enter a valid 10-digit mobile number.",
-        });
-        return;
-      }
+    const phoneValidation = validatePhoneNumber(phone, false);
+    if (!phoneValidation.isValid) {
+      res.status(400).json({ success: false, message: phoneValidation.error });
+      return;
     }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -273,7 +250,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       name,
       email: email.toLowerCase(),
       password,
-      phone,
+      phone: phoneValidation.cleanPhone,
     });
 
     const token = generateToken(user._id.toString());
@@ -610,6 +587,12 @@ export const addAddress = async (req: AuthRequest, res: Response, next: NextFunc
       return;
     }
 
+    const phoneValidation = validatePhoneNumber(phone, true);
+    if (!phoneValidation.isValid) {
+      res.status(400).json({ success: false, message: phoneValidation.error });
+      return;
+    }
+
     if (isDefault || req.user.addresses.length === 0) {
       req.user.addresses.forEach((a) => (a.isDefault = false));
     }
@@ -617,7 +600,7 @@ export const addAddress = async (req: AuthRequest, res: Response, next: NextFunc
     req.user.addresses.push({
       fullName: String(fullName).trim(),
       email: String(email).trim(),
-      phone: String(phone).trim(),
+      phone: phoneValidation.cleanPhone!,
       houseBuilding: String(houseBuilding).trim(),
       street: String(street).trim(),
       city: String(city).trim(),
@@ -659,7 +642,14 @@ export const updateAddress = async (req: AuthRequest, res: Response, next: NextF
     }
 
     if (req.body.fullName) addr.fullName = String(req.body.fullName).trim();
-    if (req.body.phone) addr.phone = String(req.body.phone).trim();
+    if (req.body.phone) {
+      const phoneValidation = validatePhoneNumber(req.body.phone, true);
+      if (!phoneValidation.isValid) {
+        res.status(400).json({ success: false, message: phoneValidation.error });
+        return;
+      }
+      addr.phone = phoneValidation.cleanPhone!;
+    }
     if (req.body.houseBuilding) addr.houseBuilding = String(req.body.houseBuilding).trim();
     if (req.body.street) addr.street = String(req.body.street).trim();
     if (req.body.city) addr.city = String(req.body.city).trim();
