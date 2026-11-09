@@ -380,10 +380,11 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 
       loginAttempts.set(rateLimitKey, currentAttempt);
       const remaining = 5 - currentAttempt.count;
+      const credentialLabel = isEmail ? "email address" : "mobile number";
 
       res.status(401).json({
         success: false,
-        message: `Invalid email/phone or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before temporary lockout.`,
+        message: `Incorrect ${credentialLabel} or password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before temporary lockout.`,
         remainingAttempts: remaining,
       });
       return;
