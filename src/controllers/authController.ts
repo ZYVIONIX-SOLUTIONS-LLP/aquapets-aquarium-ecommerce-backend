@@ -23,6 +23,27 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
       return;
     }
 
+    const cleanName = (name || "").trim();
+    if (!/^[A-Za-z\s.'-]+$/.test(cleanName) || cleanName.replace(/[^A-Za-z]/g, "").length < 2) {
+      res.status(400).json({
+        success: false,
+        message: "Full name should only contain letters and spaces (minimum 2 characters).",
+      });
+      return;
+    }
+
+    if (phone && phone.trim()) {
+      const cleanPhone = phone.replace(/\D/g, "");
+      const isRepeating = /^(\d)\1{9}$/.test(cleanPhone);
+      if (!/^[6-9]\d{9}$/.test(cleanPhone) || isRepeating) {
+        res.status(400).json({
+          success: false,
+          message: "Please enter a valid 10-digit mobile number.",
+        });
+        return;
+      }
+    }
+
     if (password.length < 6) {
       res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
       return;
@@ -219,6 +240,27 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     if (!name || !email || !password) {
       res.status(400).json({ success: false, message: "Name, email, and password are required" });
       return;
+    }
+
+    const cleanName = (name || "").trim();
+    if (!/^[A-Za-z\s.'-]+$/.test(cleanName) || cleanName.replace(/[^A-Za-z]/g, "").length < 2) {
+      res.status(400).json({
+        success: false,
+        message: "Full name should only contain letters and spaces (minimum 2 characters).",
+      });
+      return;
+    }
+
+    if (phone && phone.trim()) {
+      const cleanPhone = phone.replace(/\D/g, "");
+      const isRepeating = /^(\d)\1{9}$/.test(cleanPhone);
+      if (!/^[6-9]\d{9}$/.test(cleanPhone) || isRepeating) {
+        res.status(400).json({
+          success: false,
+          message: "Please enter a valid 10-digit mobile number.",
+        });
+        return;
+      }
     }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
