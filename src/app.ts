@@ -19,6 +19,9 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 const allowedOrigins = [
   config.clientUrl,
   process.env.ADMIN_URL,
+  "https://aquapetsaquarium.com",
+  "https://www.aquapetsaquarium.com",
+  "https://admin.aquapetsaquarium.com",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   "http://localhost:3001",
@@ -36,7 +39,7 @@ app.use(
         process.env.NODE_ENV !== "production" ||
         origin.includes("localhost") ||
         origin.includes("127.0.0.1") ||
-        origin.endsWith("aquapetsaquarium.com");
+        origin.includes("aquapetsaquarium.com");
 
       if (isAllowed) {
         return callback(null, true);

@@ -178,7 +178,7 @@ export const sendNewsletterEmail = async (
           <div class="body">
             <h2 style="color: #06233a; font-size: 18px; margin-top: 0;">${subject}</h2>
             <div class="content-box">${content}</div>
-            <a href="http://localhost:3000/shop" class="cta-btn">Visit Storefront →</a>
+            <a href="${config.clientUrl}/shop" class="cta-btn">Visit Storefront →</a>
           </div>
           <div class="footer">
             &copy; ${new Date().getFullYear()} AquaPets Aquarium. All rights reserved.<br/>

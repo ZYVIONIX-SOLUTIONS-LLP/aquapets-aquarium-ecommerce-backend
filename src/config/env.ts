@@ -4,7 +4,7 @@ dotenv.config();
 export const config = {
   port: parseInt(process.env.PORT || "5000", 10),
   nodeEnv: process.env.NODE_ENV || "development",
-  clientUrl: process.env.CLIENT_URL || "http://localhost:3000",
+  clientUrl: process.env.CLIENT_URL || (process.env.NODE_ENV === "production" ? "https://aquapetsaquarium.com" : "http://localhost:3000"),
   mongodbUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/aqua_pets_aquarium",
   jwtSecret: process.env.JWT_SECRET || "aqua_pets_super_secret_jwt_key_2026",
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "7d",
