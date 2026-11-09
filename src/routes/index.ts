@@ -9,6 +9,7 @@ import guideRoutes from "./guideRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
 import wishlistRoutes from "./wishlistRoutes.js";
 import subscriberRoutes from "./subscriberRoutes.js";
+import cartRoutes from "./cartRoutes.js";
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.get("/", (req, res) => {
       guides: "/api/guides",
       upload: "/api/upload",
       wishlist: "/api/wishlist",
+      cart: "/api/cart",
       subscribers: "/api/subscribers",
     },
   });
@@ -50,6 +52,7 @@ router.use("/shipping", shippingRoutes);
 router.use("/guides", guideRoutes);
 router.use("/upload", uploadRoutes);
 router.use("/wishlist", wishlistRoutes);
+router.use("/cart", cartRoutes);
 router.use("/subscribers", subscriberRoutes);
 
 export default router;

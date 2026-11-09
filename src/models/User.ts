@@ -15,6 +15,12 @@ export interface IAddress {
   addressType?: string;
 }
 
+export interface ICartItem {
+  product: Types.ObjectId;
+  quantity: number;
+  selectedVariant?: string;
+}
+
 export interface IUser extends Document {
   name: string;
   email: string;
@@ -26,6 +32,7 @@ export interface IUser extends Document {
   isEmailVerified?: boolean;
   addresses: IAddress[];
   wishlist: Types.ObjectId[];
+  cart: ICartItem[];
   comparePassword(candidatePassword: string): Promise<boolean>;
   createdAt: Date;
   updatedAt: Date;
@@ -44,6 +51,15 @@ const addressSchema = new Schema<IAddress>({
   addressType: { type: String, default: "HOME" },
 });
 
+const cartItemSchema = new Schema<ICartItem>(
+  {
+    product: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+    quantity: { type: Number, required: true, min: 1, default: 1 },
+    selectedVariant: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true, trim: true },
@@ -56,6 +72,7 @@ const userSchema = new Schema<IUser>(
     isEmailVerified: { type: Boolean, default: false },
     addresses: [addressSchema],
     wishlist: [{ type: Schema.Types.ObjectId, ref: "Product", default: [] }],
+    cart: { type: [cartItemSchema], default: [] },
   },
   {
     timestamps: true,
