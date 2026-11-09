@@ -5,7 +5,7 @@ import { Otp } from "../models/Otp.js";
 import { sendRegistrationOtpEmail, sendPasswordResetOtpEmail } from "../services/emailService.js";
 import { config } from "../config/env.js";
 import { AuthRequest } from "../middleware/auth.js";
-import { validatePhoneNumber, validateFullName } from "../utils/phone.js";
+import { validatePhoneNumber, validateFullName, validatePasswordStrength } from "../utils/phone.js";
 
 const generateToken = (id: string): string => {
   return jwt.sign({ id }, config.jwtSecret, { expiresIn: config.jwtExpiresIn as any });
@@ -31,8 +31,10 @@ export const sendRegistrationOtp = async (req: Request, res: Response, next: Nex
       return;
     }
 
-    if (password.length < 6) {
-      res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    // Validate password strength
+    const passwordValidation = validatePasswordStrength(password);
+    if (!passwordValidation.isValid) {
+      res.status(400).json({ success: false, message: passwordValidation.error });
       return;
     }
 
@@ -243,8 +245,10 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       return;
     }
 
-    if (password.length < 6) {
-      res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    // Validate password strength
+    const passwordValidation = validatePasswordStrength(password);
+    if (!passwordValidation.isValid) {
+      res.status(400).json({ success: false, message: passwordValidation.error });
       return;
     }
 
@@ -492,8 +496,10 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    if (newPassword.length < 6) {
-      res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
+    // Validate new password strength
+    const passwordValidation = validatePasswordStrength(newPassword);
+    if (!passwordValidation.isValid) {
+      res.status(400).json({ success: false, message: passwordValidation.error });
       return;
     }
 

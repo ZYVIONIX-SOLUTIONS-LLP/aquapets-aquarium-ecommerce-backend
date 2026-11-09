@@ -148,3 +148,49 @@ export function validatePhoneNumber(
   return { isValid: true, cleanPhone: digits };
 }
 
+export interface PasswordValidationResult {
+  isValid: boolean;
+  error?: string;
+}
+
+/**
+ * Validates password strength according to security standards:
+ * - Minimum 6 characters (already maintained)
+ * - At least one uppercase letter (A-Z)
+ * - At least one lowercase letter (a-z)
+ * - At least one number (0-9)
+ * - At least one special character (!@#$%^&* etc.)
+ */
+export function validatePasswordStrength(password?: string | null): PasswordValidationResult {
+  if (password === undefined || password === null) {
+    return { isValid: false, error: "Password is required" };
+  }
+
+  const pwd = String(password);
+  if (!pwd) {
+    return { isValid: false, error: "Password cannot be empty" };
+  }
+
+  if (pwd.length < 6) {
+    return { isValid: false, error: "Password must be at least 6 characters long" };
+  }
+
+  if (!/[A-Z]/.test(pwd)) {
+    return { isValid: false, error: "Password must contain at least one uppercase letter (A-Z)" };
+  }
+
+  if (!/[a-z]/.test(pwd)) {
+    return { isValid: false, error: "Password must contain at least one lowercase letter (a-z)" };
+  }
+
+  if (!/[0-9]/.test(pwd)) {
+    return { isValid: false, error: "Password must contain at least one number (0-9)" };
+  }
+
+  if (!/[^A-Za-z0-9]/.test(pwd)) {
+    return { isValid: false, error: "Password must contain at least one special character (e.g. !@#$%^&*)" };
+  }
+
+  return { isValid: true };
+}
+
