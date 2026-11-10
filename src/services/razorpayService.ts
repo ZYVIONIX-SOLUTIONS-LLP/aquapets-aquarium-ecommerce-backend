@@ -110,4 +110,112 @@ export class RazorpayService {
   static async fetchPayment(paymentId: string) {
     return await razorpayInstance.payments.fetch(paymentId);
   }
+
+  /**
+   * Fetch order details by orderId from Razorpay
+   */
+  static async fetchOrder(orderId: string) {
+    if (!orderId) return null;
+    try {
+      if (config.razorpay.keySecret && config.razorpay.keySecret !== "YOUR_RAZORPAY_TEST_SECRET") {
+        return await razorpayInstance.orders.fetch(orderId);
+      }
+    } catch (apiErr: any) {
+      console.warn(`⚠️ Razorpay fetchOrder error for ${orderId}:`, apiErr?.error?.description || apiErr?.message);
+    }
+    return null;
+  }
+
+  /**
+   * Fetch all payments associated with a Razorpay orderId
+   */
+  static async fetchOrderPayments(orderId: string): Promise<any[]> {
+    if (!orderId) return [];
+    try {
+      if (config.razorpay.keySecret && config.razorpay.keySecret !== "YOUR_RAZORPAY_TEST_SECRET") {
+        const res: any = await razorpayInstance.orders.fetchPayments(orderId);
+        if (Array.isArray(res)) return res;
+        if (res && Array.isArray(res.items)) return res.items;
+      }
+    } catch (apiErr: any) {
+      console.warn(`⚠️ Razorpay fetchOrderPayments error for ${orderId}:`, apiErr?.error?.description || apiErr?.message);
+    }
+    return [];
+  }
+
+  /**
+   * Independently verify payment status directly with Razorpay
+   * Checks both order entity status and payment items.
+   */
+  static async checkOrderPaidStatus(razorpayOrderId: string): Promise<{
+    isPaid: boolean;
+    paymentId?: string;
+    amount?: number;
+    status?: string;
+    rawPayment?: any;
+    error?: string;
+  }> {
+    if (!razorpayOrderId) {
+      return { isPaid: false, error: "Missing razorpayOrderId" };
+    }
+
+    try {
+      // 1. Fetch payments associated with this Razorpay order
+      const payments = await this.fetchOrderPayments(razorpayOrderId);
+      if (payments && payments.length > 0) {
+        // Find any successfully captured payment
+        const capturedPayment = payments.find((p: any) => p && p.status === "captured");
+        if (capturedPayment) {
+          return {
+            isPaid: true,
+            paymentId: capturedPayment.id,
+            amount: capturedPayment.amount ? capturedPayment.amount / 100 : undefined,
+            status: "captured",
+            rawPayment: capturedPayment,
+          };
+        }
+
+        // Find any authorized payment (can be auto-captured)
+        const authorizedPayment = payments.find((p: any) => p && p.status === "authorized");
+        if (authorizedPayment) {
+          return {
+            isPaid: true,
+            paymentId: authorizedPayment.id,
+            amount: authorizedPayment.amount ? authorizedPayment.amount / 100 : undefined,
+            status: "authorized",
+            rawPayment: authorizedPayment,
+          };
+        }
+      }
+
+      // 2. Fallback to order status check on Razorpay
+      const rzpOrder: any = await this.fetchOrder(razorpayOrderId);
+      if (rzpOrder) {
+        const isPaid =
+          rzpOrder.status === "paid" ||
+          (typeof rzpOrder.amount_paid === "number" && rzpOrder.amount_paid > 0 && rzpOrder.amount_paid >= rzpOrder.amount);
+
+        if (isPaid) {
+          const fallbackPaymentId = payments?.[0]?.id || `pay_verified_${rzpOrder.id}`;
+          return {
+            isPaid: true,
+            paymentId: fallbackPaymentId,
+            amount: rzpOrder.amount_paid ? rzpOrder.amount_paid / 100 : undefined,
+            status: rzpOrder.status,
+            rawPayment: rzpOrder,
+          };
+        }
+
+        return {
+          isPaid: false,
+          status: rzpOrder.status,
+        };
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Error checking Razorpay status for ${razorpayOrderId}:`, err?.message);
+      return { isPaid: false, error: err?.message };
+    }
+
+    return { isPaid: false };
+  }
 }

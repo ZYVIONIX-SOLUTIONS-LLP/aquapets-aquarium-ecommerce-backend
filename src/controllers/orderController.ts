@@ -6,6 +6,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { RazorpayService } from "../services/razorpayService.js";
 import { sendShopOwnerNotification } from "../services/whatsappService.js";
 import { isErnakulamPincode } from "../utils/pincode.js";
+import { reconcileOrderWithRazorpay } from "./paymentController.js";
 
 export const createOrder = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -260,9 +261,21 @@ export const getOrderByIdOrNumber = async (req: Request, res: Response, next: Ne
       return;
     }
 
+    let finalOrder = order;
+    if (order.paymentStatus !== "PAID" && order.paymentStatus !== "Paid" && order.razorpayOrderId) {
+      try {
+        const reconciliation = await reconcileOrderWithRazorpay(order);
+        if (reconciliation.isPaid && reconciliation.order) {
+          finalOrder = reconciliation.order;
+        }
+      } catch (recErr) {
+        console.warn("⚠️ Reconcile check in getOrderByIdOrNumber error:", recErr);
+      }
+    }
+
     res.json({
       success: true,
-      data: order,
+      data: finalOrder,
     });
   } catch (error) {
     next(error);

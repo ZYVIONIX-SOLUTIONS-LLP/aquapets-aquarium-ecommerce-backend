@@ -213,6 +213,204 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response, next: 
 };
 
 /**
+ * Centralized, Idempotent Order Payment Confirmation Pipeline.
+ * Safely executes:
+ * 1. Status update to PAID & CONFIRMED
+ * 2. Payment record update / creation
+ * 3. Inventory deduction
+ * 4. Shiprocket automated booking (for courier shipments)
+ * 5. Customer & Shop Owner WhatsApp alerts
+ * Guaranteed safe to call repeatedly (idempotent).
+ */
+export const processSuccessfulOrderPayment = async (
+  order: any,
+  details: {
+    razorpayPaymentId?: string;
+    razorpaySignature?: string;
+    source?: string;
+  }
+): Promise<{ success: boolean; order: any; alreadyPaid?: boolean }> => {
+  // Idempotency: If already marked PAID, return existing order safely without duplicate stock deduction or Shiprocket push
+  if (order.paymentStatus === "PAID" || order.paymentStatus === "Paid") {
+    return { success: true, order, alreadyPaid: true };
+  }
+
+  // Update Order to PAID & CONFIRMED
+  order.paymentStatus = "PAID";
+  order.orderStatus = "CONFIRMED";
+  if (details.razorpayPaymentId) order.razorpayPaymentId = details.razorpayPaymentId;
+  if (details.razorpaySignature) order.razorpaySignature = details.razorpaySignature;
+  await order.save();
+
+  // Update or create tracking Payment record
+  try {
+    let payment = await Payment.findOne({
+      $or: [
+        { razorpayOrderId: order.razorpayOrderId },
+        { orderId: order._id },
+      ],
+    });
+
+    if (payment) {
+      payment.status = "captured";
+      if (details.razorpayPaymentId) payment.razorpayPaymentId = details.razorpayPaymentId;
+      if (details.razorpaySignature) payment.razorpaySignature = details.razorpaySignature;
+      await payment.save();
+    } else {
+      await Payment.create({
+        orderId: order._id,
+        razorpayOrderId: order.razorpayOrderId,
+        razorpayPaymentId: details.razorpayPaymentId,
+        razorpaySignature: details.razorpaySignature,
+        amount: order.total,
+        currency: "INR",
+        status: "captured",
+      });
+    }
+  } catch (payErr) {
+    console.warn("⚠️ Payment record update warning:", payErr);
+  }
+
+  // Decrement product inventory safely
+  for (const item of order.items) {
+    try {
+      await Product.findByIdAndUpdate(item.productId, {
+        $inc: { stock: -item.quantity },
+      });
+    } catch (stockErr) {
+      console.warn(`Could not update stock for product ${item.productId}:`, stockErr);
+    }
+  }
+
+  // Automatically push Courier orders to Shiprocket upon confirmed payment
+  if (order.deliveryMethod !== "porter") {
+    try {
+      const orderItems = order.items.map((item: any) => ({
+        name: item.name,
+        sku: item.slug || item.productId.toString(),
+        units: item.quantity,
+        selling_price: item.price,
+      }));
+
+      const totalWeight = order.items.reduce(
+        (sum: number, item: any) => sum + (item.weightKg || 0.5) * item.quantity,
+        0
+      );
+
+      const shiprocketResponse = await ShiprocketService.createOrder({
+        order_id: order.orderNumber,
+        order_date: new Date(order.createdAt).toISOString().replace("T", " ").substring(0, 19),
+        billing_customer_name: order.shippingAddress.fullName,
+        billing_address: `${order.shippingAddress.houseBuilding || ""}, ${order.shippingAddress.street || ""}`.trim() || order.shippingAddress.city || "Kerala",
+        billing_city: order.shippingAddress.city || "Kochi",
+        billing_pincode: order.shippingAddress.pincode,
+        billing_state: order.shippingAddress.state || "Kerala",
+        billing_email: order.shippingAddress.email || "customer@aquapets.in",
+        billing_phone: order.shippingAddress.phone,
+        shipping_is_billing: true,
+        order_items: orderItems,
+        payment_method: "Prepaid",
+        sub_total: order.total,
+        weight: totalWeight || 0.5,
+      });
+
+      if (shiprocketResponse && shiprocketResponse.order_id) {
+        order.shiprocket = order.shiprocket || {};
+        order.shiprocket.orderId = shiprocketResponse.order_id;
+        order.shiprocket.shipmentId = shiprocketResponse.shipment_id;
+        order.shiprocket.status = shiprocketResponse.status || "PROCESSING";
+        await order.save();
+        console.log(`✅ Order ${order.orderNumber} successfully pushed to Shiprocket (ID: ${shiprocketResponse.order_id})`);
+      }
+    } catch (srErr: any) {
+      console.warn("⚠️ Shiprocket auto-sync notice:", srErr.response?.data?.message || srErr.message);
+    }
+  }
+
+  // Send automated WhatsApp notifications to shop owner and customer
+  try {
+    const waPayload = {
+      orderNumber: order.orderNumber,
+      customerName: order.shippingAddress.fullName,
+      customerPhone: order.shippingAddress.phone,
+      shippingAddress: order.shippingAddress,
+      items: order.items.map((i: any) => ({ name: i.name, quantity: i.quantity, price: i.price })),
+      subtotal: order.subtotal,
+      deliveryFee: order.deliveryFee,
+      total: order.total,
+      paymentMethod: `Razorpay (${details.source || "Paid"} #${details.razorpayPaymentId || ""})`,
+      deliveryMethod: order.deliveryMethod,
+      notes: order.notes,
+    };
+    await Promise.allSettled([
+      sendShopOwnerNotification(waPayload),
+      sendCustomerNotification(waPayload),
+    ]);
+  } catch (waErr) {
+    console.warn("WhatsApp notification error:", waErr);
+  }
+
+  return { success: true, order, alreadyPaid: false };
+};
+
+/**
+ * Independently reconciles an order with Razorpay live API.
+ * If Razorpay captured the payment, automatically executes the full confirmation pipeline.
+ */
+export const reconcileOrderWithRazorpay = async (
+  order: any
+): Promise<{
+  isPaid: boolean;
+  reconciled: boolean;
+  order: any;
+  paymentId?: string;
+  razorpayStatus?: string;
+  error?: string;
+}> => {
+  if (!order) {
+    return { isPaid: false, reconciled: false, order: null, error: "Order not found" };
+  }
+
+  // If order is already paid, no reconciliation needed
+  if (order.paymentStatus === "PAID" || order.paymentStatus === "Paid") {
+    return { isPaid: true, reconciled: false, order };
+  }
+
+  if (!order.razorpayOrderId) {
+    return { isPaid: false, reconciled: false, order, error: "No Razorpay Order ID on this order" };
+  }
+
+  // Query Razorpay API directly
+  const statusCheck = await RazorpayService.checkOrderPaidStatus(order.razorpayOrderId);
+
+  if (statusCheck.isPaid) {
+    console.log(
+      `🔔 [Razorpay Reconciliation] Order ${order.orderNumber} (${order.razorpayOrderId}) independently verified as PAID on Razorpay (Payment: ${statusCheck.paymentId}). Confirming order...`
+    );
+
+    const result = await processSuccessfulOrderPayment(order, {
+      razorpayPaymentId: statusCheck.paymentId,
+      source: "Razorpay Auto-Reconciled",
+    });
+
+    return {
+      isPaid: true,
+      reconciled: true,
+      order: result.order,
+      paymentId: statusCheck.paymentId,
+      razorpayStatus: statusCheck.status,
+    };
+  }
+
+  return {
+    isPaid: false,
+    reconciled: false,
+    order,
+    razorpayStatus: statusCheck.status || "unpaid",
+  };
+};
+
+/**
  * 2. POST /api/payment/verify
  * Server-side HMAC SHA256 signature verification.
  * Marks paymentStatus = 'PAID' and orderStatus = 'CONFIRMED'.
@@ -265,120 +463,40 @@ export const verifyPayment = async (req: Request, res: Response, next: NextFunct
     // Perform Server-Side HMAC-SHA256 Signature Verification
     const isValid = RazorpayService.verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
 
-    const payment = await Payment.findOne({ razorpayOrderId });
-
     if (!isValid) {
-      order.paymentStatus = "FAILED";
-      await order.save();
+      // Before immediately marking FAILED, check Razorpay directly
+      // In case client signature differed or test mock payload was used
+      const rzpCheck = await RazorpayService.checkOrderPaidStatus(razorpayOrderId);
+      if (!rzpCheck.isPaid) {
+        order.paymentStatus = "FAILED";
+        await order.save();
 
-      if (payment) {
-        payment.status = "failed";
-        payment.failureReason = "Signature mismatch";
-        await payment.save();
-      }
-
-      res.status(400).json({ success: false, message: "Payment verification failed: invalid signature" });
-      return;
-    }
-
-    // Update Order to PAID & CONFIRMED
-    order.paymentStatus = "PAID";
-    order.orderStatus = "CONFIRMED";
-    order.razorpayPaymentId = razorpayPaymentId;
-    order.razorpaySignature = razorpaySignature;
-    await order.save();
-
-    // Update Payment Record
-    if (payment) {
-      payment.status = "captured";
-      payment.razorpayPaymentId = razorpayPaymentId;
-      payment.razorpaySignature = razorpaySignature;
-      await payment.save();
-    }
-
-    // Decrement product inventory safely
-    for (const item of order.items) {
-      try {
-        await Product.findByIdAndUpdate(item.productId, {
-          $inc: { stock: -item.quantity },
-        });
-      } catch (stockErr) {
-        console.warn(`Could not update stock for product ${item.productId}:`, stockErr);
-      }
-    }
-
-    // Automatically push Courier orders to Shiprocket upon confirmed payment
-    if (order.deliveryMethod !== "porter") {
-      try {
-        const orderItems = order.items.map((item) => ({
-          name: item.name,
-          sku: item.slug || item.productId.toString(),
-          units: item.quantity,
-          selling_price: item.price,
-        }));
-
-        const totalWeight = order.items.reduce(
-          (sum, item) => sum + (item.weightKg || 0.5) * item.quantity,
-          0
-        );
-
-        const shiprocketResponse = await ShiprocketService.createOrder({
-          order_id: order.orderNumber,
-          order_date: new Date(order.createdAt).toISOString().replace("T", " ").substring(0, 19),
-          billing_customer_name: order.shippingAddress.fullName,
-          billing_address: `${order.shippingAddress.houseBuilding || ""}, ${order.shippingAddress.street || ""}`.trim() || order.shippingAddress.city || "Kerala",
-          billing_city: order.shippingAddress.city || "Kochi",
-          billing_pincode: order.shippingAddress.pincode,
-          billing_state: order.shippingAddress.state || "Kerala",
-          billing_email: order.shippingAddress.email || "customer@aquapets.in",
-          billing_phone: order.shippingAddress.phone,
-          shipping_is_billing: true,
-          order_items: orderItems,
-          payment_method: "Prepaid",
-          sub_total: order.total,
-          weight: totalWeight || 0.5,
-        });
-
-        if (shiprocketResponse && shiprocketResponse.order_id) {
-          order.shiprocket.orderId = shiprocketResponse.order_id;
-          order.shiprocket.shipmentId = shiprocketResponse.shipment_id;
-          order.shiprocket.status = shiprocketResponse.status || "PROCESSING";
-          await order.save();
-          console.log(`✅ Order ${order.orderNumber} successfully pushed to Shiprocket (ID: ${shiprocketResponse.order_id})`);
+        const payment = await Payment.findOne({ razorpayOrderId });
+        if (payment) {
+          payment.status = "failed";
+          payment.failureReason = "Signature mismatch";
+          await payment.save();
         }
-      } catch (srErr: any) {
-        console.warn("⚠️ Shiprocket auto-sync notice:", srErr.response?.data?.message || srErr.message);
+
+        res.status(400).json({ success: false, message: "Payment verification failed: invalid signature" });
+        return;
       }
     }
 
-    // Send automated WhatsApp notifications to shop owner and customer
-    try {
-      const waPayload = {
-        orderNumber: order.orderNumber,
-        customerName: order.shippingAddress.fullName,
-        customerPhone: order.shippingAddress.phone,
-        shippingAddress: order.shippingAddress,
-        items: order.items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })),
-        subtotal: order.subtotal,
-        deliveryFee: order.deliveryFee,
-        total: order.total,
-        paymentMethod: `Razorpay (Paid #${razorpayPaymentId})`,
-        deliveryMethod: order.deliveryMethod,
-        notes: order.notes,
-      };
-      await Promise.allSettled([
-        sendShopOwnerNotification(waPayload),
-        sendCustomerNotification(waPayload),
-      ]);
-    } catch (waErr) {
-      console.warn("WhatsApp notification error:", waErr);
-    }
+    // Run unified confirmation pipeline
+    const result = await processSuccessfulOrderPayment(order, {
+      razorpayPaymentId,
+      razorpaySignature,
+      source: "Client Callback Verification",
+    });
+
+    const payment = await Payment.findOne({ razorpayOrderId });
 
     res.json({
       success: true,
       message: "Payment verified and order confirmed successfully",
       data: {
-        order,
+        order: result.order,
         payment,
       },
     });
@@ -420,35 +538,11 @@ export const handleRazorpayWebhook = async (req: Request, res: Response, next: N
 
       if (rzpOrderId) {
         const order = await Order.findOne({ razorpayOrderId: rzpOrderId });
-        if (order && order.paymentStatus !== "PAID" && order.paymentStatus !== "Paid") {
-          order.paymentStatus = "PAID";
-          order.orderStatus = "CONFIRMED";
-          if (rzpPaymentId) order.razorpayPaymentId = rzpPaymentId;
-          await order.save();
-
-          // Decrement stock
-          for (const item of order.items) {
-            await Product.findByIdAndUpdate(item.productId, {
-              $inc: { stock: -item.quantity },
-            });
-          }
-
-          // WhatsApp alerts to shop owner and customer
-          const waPayload = {
-            orderNumber: order.orderNumber,
-            customerName: order.shippingAddress.fullName,
-            customerPhone: order.shippingAddress.phone,
-            shippingAddress: order.shippingAddress,
-            items: order.items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price })),
-            total: order.total,
-            paymentMethod: `Razorpay Webhook (Paid #${rzpPaymentId || ""})`,
-            deliveryMethod: order.deliveryMethod,
-            notes: order.notes,
-          };
-          await Promise.allSettled([
-            sendShopOwnerNotification(waPayload),
-            sendCustomerNotification(waPayload),
-          ]);
+        if (order) {
+          await processSuccessfulOrderPayment(order, {
+            razorpayPaymentId: rzpPaymentId,
+            source: `Razorpay Webhook (${event})`,
+          });
         }
       }
     }
@@ -462,18 +556,36 @@ export const handleRazorpayWebhook = async (req: Request, res: Response, next: N
 /**
  * 4. GET /api/payment/status/:orderId
  * Returns current payment & order status for polling / reconnection recovery.
+ * Independently reconciles with Razorpay live API if order is not marked PAID!
  */
 export const getPaymentStatus = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { orderId } = req.params;
 
-    const order = await Order.findOne({
+    let order = await Order.findOne({
       $or: [
         { _id: typeof orderId === "string" && orderId.match(/^[0-9a-fA-F]{24}$/) ? orderId : null },
         { orderNumber: orderId },
         { razorpayOrderId: orderId },
       ],
     });
+
+    if (!order) {
+      res.status(404).json({ success: false, message: "Order not found" });
+      return;
+    }
+
+    // Auto-reconcile with Razorpay if order is not yet marked PAID and has a Razorpay Order ID!
+    if (order.paymentStatus !== "PAID" && order.paymentStatus !== "Paid" && order.razorpayOrderId) {
+      try {
+        const reconciliation = await reconcileOrderWithRazorpay(order);
+        if (reconciliation.isPaid && reconciliation.order) {
+          order = reconciliation.order;
+        }
+      } catch (recErr) {
+        console.warn("⚠️ Background reconciliation check error:", recErr);
+      }
+    }
 
     if (!order) {
       res.status(404).json({ success: false, message: "Order not found" });
@@ -511,6 +623,105 @@ export const getPaymentStatus = async (req: AuthRequest, res: Response, next: Ne
         total: order.total,
         items: order.items,
         shippingAddress: order.shippingAddress,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 5. POST /api/payment/reconcile/:orderId
+ * On-demand endpoint to force-reconcile an order directly with Razorpay's API.
+ * Can be called by Admin panel or client recovery flow.
+ */
+export const reconcilePaymentOrder = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findOne({
+      $or: [
+        { _id: typeof orderId === "string" && orderId.match(/^[0-9a-fA-F]{24}$/) ? orderId : null },
+        { orderNumber: orderId },
+        { razorpayOrderId: orderId },
+      ],
+    });
+
+    if (!order) {
+      res.status(404).json({ success: false, message: "Order not found" });
+      return;
+    }
+
+    const result = await reconcileOrderWithRazorpay(order);
+
+    res.json({
+      success: true,
+      message: result.isPaid
+        ? (result.reconciled
+            ? `Payment verified on Razorpay! Order ${order.orderNumber} marked as PAID and confirmed.`
+            : `Order ${order.orderNumber} is already confirmed and marked as PAID.`)
+        : `Razorpay check complete: No captured payment found for order ${order.orderNumber} (Razorpay status: ${result.razorpayStatus || "unpaid"}).`,
+      data: {
+        isPaid: result.isPaid,
+        reconciled: result.reconciled,
+        razorpayStatus: result.razorpayStatus,
+        paymentId: result.paymentId,
+        order: result.order,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 6. POST /api/payment/reconcile-all
+ * Batch reconciliation for all unpaid/abandoned orders.
+ * Admin-only operation that sweeps recent unpaid orders and checks with Razorpay.
+ */
+export const reconcileAllAbandonedOrders = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const pendingOrders = await Order.find({
+      paymentStatus: { $nin: ["PAID", "Paid"] },
+      razorpayOrderId: { $exists: true, $ne: "" },
+    }).sort({ createdAt: -1 }).limit(50);
+
+    const results = [];
+    let recoveredCount = 0;
+
+    for (const order of pendingOrders) {
+      try {
+        const check = await reconcileOrderWithRazorpay(order);
+        if (check.isPaid && check.reconciled) {
+          recoveredCount++;
+          results.push({
+            orderNumber: order.orderNumber,
+            recovered: true,
+            paymentId: check.paymentId,
+          });
+        } else {
+          results.push({
+            orderNumber: order.orderNumber,
+            recovered: false,
+            razorpayStatus: check.razorpayStatus,
+          });
+        }
+      } catch (err: any) {
+        results.push({
+          orderNumber: order.orderNumber,
+          recovered: false,
+          error: err.message,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Reconciliation complete: checked ${pendingOrders.length} orders, recovered ${recoveredCount} paid orders!`,
+      data: {
+        totalChecked: pendingOrders.length,
+        recoveredCount,
+        details: results,
       },
     });
   } catch (error) {
@@ -558,6 +769,27 @@ export const cancelPendingOrder = async (req: AuthRequest, res: Response, next: 
 
     // Only allow cancelling if still PENDING / CREATED
     if (order.paymentStatus === "PENDING" || order.paymentStatus === "Pending") {
+      // Safety Check: Verify with Razorpay first before cancelling
+      if (order.razorpayOrderId) {
+        try {
+          const check = await RazorpayService.checkOrderPaidStatus(order.razorpayOrderId);
+          if (check.isPaid) {
+            await processSuccessfulOrderPayment(order, {
+              razorpayPaymentId: check.paymentId,
+              source: "Cancel Request Reconcile Guard",
+            });
+            res.json({
+              success: true,
+              message: "Payment was captured on Razorpay! Order confirmed instead of cancelled.",
+              data: { orderId: order._id, orderNumber: order.orderNumber, paymentStatus: order.paymentStatus },
+            });
+            return;
+          }
+        } catch (guardErr) {
+          console.warn("⚠️ Razorpay cancel guard error:", guardErr);
+        }
+      }
+
       order.paymentStatus = "FAILED";
       order.orderStatus = "CANCELLED";
       await order.save();
