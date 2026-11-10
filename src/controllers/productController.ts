@@ -280,3 +280,155 @@ export const deleteProduct = async (req: Request, res: Response, next: NextFunct
     next(error);
   }
 };
+
+/**
+ * Apply bulk discount/offer across all products or a specific category
+ */
+export const applyBulkOffer = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { category, discount, badge, offerType } = req.body;
+
+    const discountNum = Math.round(Number(discount));
+    if (isNaN(discountNum) || discountNum <= 0 || discountNum >= 100) {
+      res.status(400).json({ success: false, message: "Discount percentage must be between 1 and 99." });
+      return;
+    }
+
+    const query: Record<string, any> = {};
+    if (category && category !== "all") {
+      query.$or = [
+        { category: category },
+        { category: { $regex: new RegExp(`^${category}$`, "i") } },
+      ];
+    }
+
+    const products = await Product.find(query);
+    if (!products || products.length === 0) {
+      res.status(404).json({ success: false, message: "No products found matching the selected category." });
+      return;
+    }
+
+    const bulkOps: any[] = products.map((product) => {
+      // Base regular price: use existing originalPrice if valid, else current price
+      const basePrice = product.originalPrice && product.originalPrice > 0
+        ? product.originalPrice
+        : product.price;
+
+      const newPrice = Math.max(1, Math.round(basePrice * (1 - discountNum / 100)));
+
+      return {
+        updateOne: {
+          filter: { _id: product._id },
+          update: {
+            $set: {
+              originalPrice: basePrice,
+              price: newPrice,
+              discount: discountNum,
+              isOffer: true,
+              offerType: offerType || "Discount",
+              badge: badge && String(badge).trim() ? String(badge).trim() : "Sale",
+            },
+          },
+        },
+      };
+    });
+
+    const result = await Product.bulkWrite(bulkOps as any);
+
+    res.json({
+      success: true,
+      message: `Successfully applied ${discountNum}% offer to ${result.modifiedCount} product(s).`,
+      affectedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Reset / restore regular prices for products with active offers
+ */
+export const resetBulkOffers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { category } = req.body;
+
+    const query: Record<string, any> = {
+      $or: [{ isOffer: true }, { originalPrice: { $gt: 0 } }],
+    };
+
+    if (category && category !== "all") {
+      query.$and = [
+        {
+          $or: [
+            { category: category },
+            { category: { $regex: new RegExp(`^${category}$`, "i") } },
+          ],
+        },
+      ];
+    }
+
+    const products = await Product.find(query);
+    if (!products || products.length === 0) {
+      res.json({
+        success: true,
+        message: "No products currently have active offers to reset in the selected category.",
+        affectedCount: 0,
+      });
+      return;
+    }
+
+    const bulkOps: any[] = products.map((product) => {
+      const restoredPrice = product.originalPrice && product.originalPrice > 0
+        ? product.originalPrice
+        : product.price;
+
+      return {
+        updateOne: {
+          filter: { _id: product._id },
+          update: {
+            $set: {
+              price: restoredPrice,
+              discount: 0,
+              isOffer: false,
+              badge: "",
+            },
+            $unset: {
+              offerType: "",
+            },
+          },
+        },
+      };
+    });
+
+    const result = await Product.bulkWrite(bulkOps as any);
+
+    res.json({
+      success: true,
+      message: `Successfully restored regular prices for ${result.modifiedCount} product(s).`,
+      affectedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get summary of active promotional offers
+ */
+export const getOffersSummary = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const [offerProducts, totalProducts] = await Promise.all([
+      Product.find({ isOffer: true }).sort({ updatedAt: -1 }).lean(),
+      Product.countDocuments(),
+    ]);
+
+    res.json({
+      success: true,
+      totalProducts,
+      offerCount: offerProducts.length,
+      products: offerProducts,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
