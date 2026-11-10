@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { Product } from "../models/Product.js";
+import { Category } from "../models/Category.js";
 import { cloudinary } from "../config/cloudinary.js";
 import { parseCloudinaryPublicId } from "./uploadController.js";
 
@@ -330,6 +331,49 @@ export const deleteProduct = async (req: Request, res: Response, next: NextFunct
 };
 
 /**
+ * Helper to build an exact and fuzzy category query condition
+ * that matches by Category slug, Category name, or normalized slug.
+ */
+async function buildCategoryMatchCondition(categoryInput: string): Promise<Record<string, any>> {
+  const cleanCat = String(categoryInput).trim();
+  const escaped = cleanCat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const possibleMatches = [cleanCat];
+
+  try {
+    const catDoc = await Category.findOne({
+      $or: [
+        { slug: cleanCat },
+        { name: cleanCat },
+        { slug: { $regex: new RegExp(`^${escaped}$`, "i") } },
+        { name: { $regex: new RegExp(`^${escaped}$`, "i") } },
+      ],
+    });
+    if (catDoc) {
+      if (catDoc.slug) possibleMatches.push(catDoc.slug);
+      if (catDoc.name) possibleMatches.push(catDoc.name);
+    }
+  } catch {
+    // Proceed with direct matches if Category query fails
+  }
+
+  // Also add normalized kebab-case slug version (e.g. "Aquarium Filters" -> "aquarium-filters")
+  const slugified = cleanCat.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  if (slugified) possibleMatches.push(slugified);
+
+  const uniqueMatches = [...new Set(possibleMatches)];
+  return {
+    $or: uniqueMatches.flatMap((m) => {
+      const esc = m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return [
+        { category: m },
+        { category: { $regex: new RegExp(`^${esc}$`, "i") } },
+      ];
+    }),
+  };
+}
+
+/**
  * Apply bulk discount/offer across all products or a specific category
  */
 export const applyBulkOffer = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -344,10 +388,8 @@ export const applyBulkOffer = async (req: Request, res: Response, next: NextFunc
 
     const query: Record<string, any> = {};
     if (category && category !== "all") {
-      query.$or = [
-        { category: category },
-        { category: { $regex: new RegExp(`^${category}$`, "i") } },
-      ];
+      const catCondition = await buildCategoryMatchCondition(category);
+      Object.assign(query, catCondition);
     }
 
     const products = await Product.find(query);
@@ -401,18 +443,16 @@ export const resetBulkOffers = async (req: Request, res: Response, next: NextFun
     const { category } = req.body;
 
     const query: Record<string, any> = {
-      $or: [{ isOffer: true }, { originalPrice: { $gt: 0 } }],
+      $or: [{ isOffer: true }, { discount: { $gt: 0 } }],
     };
 
     if (category && category !== "all") {
+      const catCondition = await buildCategoryMatchCondition(category);
       query.$and = [
-        {
-          $or: [
-            { category: category },
-            { category: { $regex: new RegExp(`^${category}$`, "i") } },
-          ],
-        },
+        { $or: [{ isOffer: true }, { discount: { $gt: 0 } }] },
+        catCondition,
       ];
+      delete query.$or;
     }
 
     const products = await Product.find(query);
@@ -436,6 +476,7 @@ export const resetBulkOffers = async (req: Request, res: Response, next: NextFun
           update: {
             $set: {
               price: restoredPrice,
+              originalPrice: restoredPrice,
               discount: 0,
               isOffer: false,
               badge: "",

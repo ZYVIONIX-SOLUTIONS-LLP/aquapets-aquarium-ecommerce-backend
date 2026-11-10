@@ -26,7 +26,7 @@ export interface IProduct extends Document {
   isStarterKit: boolean;
   isOffer: boolean;
   isActive: boolean;
-  offerType?: "Discount" | "Buy 1 Get 1" | "Buy 2 Get 1" | "Bundle Offer" | "Combo Deal" | "Limited Time";
+  offerType?: "Discount" | "Buy 1 Get 1" | "Buy 2 Get 1" | "Bundle Offer" | "Combo Deal" | "Limited Time" | "Festival Deal";
   tankType?: "Freshwater" | "Planted Tank" | "Marine" | "Nano";
   weightKg?: number;
   dimensions?: {
@@ -71,7 +71,7 @@ const productSchema = new Schema<IProduct>(
     isActive: { type: Boolean, default: true, index: true },
     offerType: {
       type: String,
-      enum: ["Discount", "Buy 1 Get 1", "Buy 2 Get 1", "Bundle Offer", "Combo Deal", "Limited Time", null, ""],
+      enum: ["Discount", "Buy 1 Get 1", "Buy 2 Get 1", "Bundle Offer", "Combo Deal", "Limited Time", "Festival Deal", null, ""],
     },
     tankType: {
       type: String,
