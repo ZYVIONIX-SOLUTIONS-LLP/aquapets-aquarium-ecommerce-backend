@@ -344,11 +344,9 @@ export const applyBulkOffer = async (req: Request, res: Response, next: NextFunc
 
     const query: Record<string, any> = {};
     if (category && category !== "all") {
-      const cleanCat = String(category).trim();
-      const escaped = cleanCat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
-        { category: cleanCat },
-        { category: { $regex: new RegExp(`^${escaped}$`, "i") } },
+        { category: category },
+        { category: { $regex: new RegExp(`^${category}$`, "i") } },
       ];
     }
 
@@ -359,7 +357,7 @@ export const applyBulkOffer = async (req: Request, res: Response, next: NextFunc
     }
 
     const bulkOps: any[] = products.map((product) => {
-      // Base regular price: use existing originalPrice if valid and greater than 0, else current price
+      // Base regular price: use existing originalPrice if valid, else current price
       const basePrice = product.originalPrice && product.originalPrice > 0
         ? product.originalPrice
         : product.price;
@@ -402,28 +400,20 @@ export const resetBulkOffers = async (req: Request, res: Response, next: NextFun
   try {
     const { category } = req.body;
 
-    const conditions: any[] = [
-      {
-        $or: [
-          { isOffer: true },
-          { originalPrice: { $gt: 0 } },
-          { discount: { $gt: 0 } },
-        ],
-      },
-    ];
+    const query: Record<string, any> = {
+      $or: [{ isOffer: true }, { originalPrice: { $gt: 0 } }],
+    };
 
     if (category && category !== "all") {
-      const cleanCat = String(category).trim();
-      const escaped = cleanCat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      conditions.push({
-        $or: [
-          { category: cleanCat },
-          { category: { $regex: new RegExp(`^${escaped}$`, "i") } },
-        ],
-      });
+      query.$and = [
+        {
+          $or: [
+            { category: category },
+            { category: { $regex: new RegExp(`^${category}$`, "i") } },
+          ],
+        },
+      ];
     }
-
-    const query = conditions.length === 1 ? conditions[0] : { $and: conditions };
 
     const products = await Product.find(query);
     if (!products || products.length === 0) {
@@ -446,7 +436,6 @@ export const resetBulkOffers = async (req: Request, res: Response, next: NextFun
           update: {
             $set: {
               price: restoredPrice,
-              originalPrice: restoredPrice,
               discount: 0,
               isOffer: false,
               badge: "",
