@@ -17,7 +17,7 @@ const categorySchema = new Schema<ICategory>(
     slug: { type: String, required: true, unique: true, trim: true, lowercase: true },
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
-    image: { type: String, required: true },
+    image: { type: String, default: "/categories/aquariums-tanks.jpg" },
     productCount: { type: Number, default: 0 },
     iconName: { type: String, default: "Fish" },
     sortOrder: { type: Number, default: 99 },

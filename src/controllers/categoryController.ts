@@ -210,7 +210,8 @@ export const invalidateCategoryCache = () => {
 export const getCategories = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const now = Date.now();
-    if (cachedCategories && now - lastCacheTime < CACHE_TTL_MS) {
+    const forceRefresh = req.query.refresh === "true" || req.headers["cache-control"] === "no-cache";
+    if (!forceRefresh && cachedCategories && now - lastCacheTime < CACHE_TTL_MS) {
       res.json({
         success: true,
         data: cachedCategories,
@@ -289,14 +290,37 @@ export const getCategoryBySlug = async (req: Request, res: Response, next: NextF
 
 export const createCategory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const category = await Category.create(req.body);
+    const data = { ...req.body };
+    if (!data.name || !data.name.trim()) {
+      res.status(400).json({ success: false, message: "Category name is required" });
+      return;
+    }
+    if (!data.slug || !data.slug.trim()) {
+      data.slug = data.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    } else {
+      data.slug = data.slug.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    }
+    if (!data.image || !data.image.trim()) {
+      data.image = "/categories/aquariums-tanks.jpg";
+    }
+
+    const existing = await Category.findOne({ slug: data.slug });
+    if (existing) {
+      data.slug = `${data.slug}-${Date.now().toString().slice(-4)}`;
+    }
+
+    const category = await Category.create(data);
     invalidateCategoryCache();
     res.status(201).json({
       success: true,
       message: "Category created successfully",
       data: category,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      res.status(409).json({ success: false, message: "A category with this name or slug already exists." });
+      return;
+    }
     next(error);
   }
 };
