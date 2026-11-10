@@ -149,15 +149,29 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     const data = { ...req.body };
     if (data.brand) {
       data.brand = normalizeBrand(data.brand);
+    } else {
+      data.brand = "Aqua Pets";
     }
     if (data.badge === "" || data.badge === null) delete data.badge;
     if (data.offerType === "" || data.offerType === null) delete data.offerType;
     if (data.tankType === "" || data.tankType === null) delete data.tankType;
 
-    let finalSlug = data.slug || (data.name ? data.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-") : `product-${Date.now()}`);
-    const existing = await Product.findOne({ slug: finalSlug });
-    if (existing) {
-      finalSlug = `${finalSlug}-${Date.now().toString().slice(-4)}`;
+    if (!data.category || typeof data.category !== "string" || !data.category.trim()) {
+      data.category = "aquariums-tanks";
+    }
+
+    if (!data.description || typeof data.description !== "string" || !data.description.trim()) {
+      data.description = `${data.name || "Product"} - Quality aquarium supply from Aqua Pets Aquarium.`;
+    }
+
+    let baseSlug = (data.slug || (data.name ? data.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-") : `product`))
+      .replace(/^-+|-+$/g, "");
+    if (!baseSlug) baseSlug = `product-${Date.now()}`;
+
+    let finalSlug = baseSlug;
+    let counter = 1;
+    while (await Product.findOne({ slug: finalSlug })) {
+      finalSlug = `${baseSlug}-${counter++}`;
     }
     data.slug = finalSlug;
 
@@ -171,7 +185,22 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
       message: "Product created successfully",
       data: product,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.name === "ValidationError") {
+      const messages = Object.values(error.errors || {}).map((e: any) => e.message).join(", ");
+      res.status(400).json({
+        success: false,
+        message: messages || "Validation error creating product",
+      });
+      return;
+    }
+    if (error?.code === 11000) {
+      res.status(409).json({
+        success: false,
+        message: "A product with this title or slug already exists.",
+      });
+      return;
+    }
     next(error);
   }
 };

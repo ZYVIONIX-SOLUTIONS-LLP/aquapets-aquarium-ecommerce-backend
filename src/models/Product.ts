@@ -43,7 +43,7 @@ const productSchema = new Schema<IProduct>(
     name: { type: String, required: true, trim: true },
     brand: { type: String, required: true, trim: true },
     category: { type: String, required: true, trim: true, index: true },
-    description: { type: String, required: true },
+    description: { type: String, default: "" },
     fullDescription: { type: String, default: "" },
     price: { type: Number, required: true, min: 0 },
     originalPrice: { type: Number, min: 0 },
