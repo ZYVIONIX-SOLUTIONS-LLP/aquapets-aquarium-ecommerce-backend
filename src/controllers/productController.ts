@@ -31,6 +31,12 @@ export const getProducts = async (req: Request, res: Response, next: NextFunctio
     }
     if (badge) query.badge = badge;
 
+    if (req.query.isActive !== undefined) {
+      query.isActive = req.query.isActive === "true";
+    } else if (req.query.includeInactive !== "true") {
+      query.isActive = { $ne: false };
+    }
+
     if (minPrice || maxPrice) {
       query.price = {};
       if (minPrice) query.price.$gte = Number(minPrice);
@@ -89,7 +95,11 @@ export const getProducts = async (req: Request, res: Response, next: NextFunctio
 export const getProductBySlug = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { slug } = req.params;
-    const product = await Product.findOne({ slug }).lean();
+    const query: Record<string, any> = { slug };
+    if (req.query.includeInactive !== "true") {
+      query.isActive = { $ne: false };
+    }
+    const product = await Product.findOne(query).lean();
 
     if (!product) {
       res.status(404).json({ success: false, message: "Product not found" });
@@ -155,6 +165,12 @@ export const createProduct = async (req: Request, res: Response, next: NextFunct
     if (data.badge === "" || data.badge === null) delete data.badge;
     if (data.offerType === "" || data.offerType === null) delete data.offerType;
     if (data.tankType === "" || data.tankType === null) delete data.tankType;
+
+    if (data.isActive !== undefined) {
+      data.isActive = Boolean(data.isActive);
+    } else {
+      data.isActive = true;
+    }
 
     if (!data.category || typeof data.category !== "string" || !data.category.trim()) {
       data.category = "aquariums-tanks";
@@ -225,6 +241,9 @@ export const updateProduct = async (req: Request, res: Response, next: NextFunct
     if (data.tankType === "" || data.tankType === null) {
       delete data.tankType;
       unsetFields.tankType = 1;
+    }
+    if (data.isActive !== undefined) {
+      data.isActive = Boolean(data.isActive);
     }
     if (Array.isArray(data.images)) {
       data.images = await ensureCloudinaryImages(data.images);

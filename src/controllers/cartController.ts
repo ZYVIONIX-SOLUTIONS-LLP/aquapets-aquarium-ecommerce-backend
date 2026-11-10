@@ -8,10 +8,12 @@ import { Types } from "mongoose";
 const resolveProductObjectId = async (productIdentifier: string): Promise<Types.ObjectId | null> => {
   if (!productIdentifier) return null;
   if (Types.ObjectId.isValid(productIdentifier)) {
-    return new Types.ObjectId(productIdentifier);
+    const prod = await Product.findOne({ _id: productIdentifier, isActive: { $ne: false } }).select("_id");
+    return prod ? (prod._id as Types.ObjectId) : null;
   }
   const product = await Product.findOne({
     $or: [{ _id: productIdentifier }, { slug: productIdentifier }, { id: productIdentifier }],
+    isActive: { $ne: false },
   }).select("_id");
 
   return product ? (product._id as Types.ObjectId) : null;
@@ -22,7 +24,7 @@ const formatPopulatedCart = (cart: any[]): any[] => {
   if (!Array.isArray(cart)) return [];
   const formatted: any[] = [];
   for (const item of cart) {
-    if (item && item.product) {
+    if (item && item.product && item.product.isActive !== false) {
       formatted.push({
         product: item.product,
         quantity: Math.max(1, Number(item.quantity) || 1),

@@ -65,6 +65,14 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         return;
       }
 
+      if (product.isActive === false) {
+        res.status(400).json({
+          success: false,
+          message: `'${product.name}' is currently unavailable/deactivated and cannot be ordered.`,
+        });
+        return;
+      }
+
       if (product.stock < item.quantity) {
         res.status(400).json({
           success: false,

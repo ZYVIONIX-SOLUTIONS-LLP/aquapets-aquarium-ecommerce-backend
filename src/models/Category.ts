@@ -7,6 +7,7 @@ export interface ICategory extends Document {
   image: string;
   productCount: number;
   iconName: string;
+  isActive: boolean;
   sortOrder?: number;
   createdAt: Date;
   updatedAt: Date;
@@ -20,6 +21,7 @@ const categorySchema = new Schema<ICategory>(
     image: { type: String, default: "/categories/aquariums-tanks.jpg" },
     productCount: { type: Number, default: 0 },
     iconName: { type: String, default: "Fish" },
+    isActive: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 99 },
   },
   {

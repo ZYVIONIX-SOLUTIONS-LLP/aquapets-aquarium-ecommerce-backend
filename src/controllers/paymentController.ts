@@ -69,6 +69,14 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response, next: 
         return;
       }
 
+      if (product.isActive === false) {
+        res.status(400).json({
+          success: false,
+          message: `'${product.name}' is currently unavailable/deactivated and cannot be purchased.`,
+        });
+        return;
+      }
+
       const requestedQty = Math.max(1, parseInt(item.quantity || 1, 10));
 
       if (product.stock < requestedQty) {

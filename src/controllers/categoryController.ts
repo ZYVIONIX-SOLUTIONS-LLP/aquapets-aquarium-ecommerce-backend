@@ -210,7 +210,8 @@ export const invalidateCategoryCache = () => {
 export const getCategories = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const now = Date.now();
-    const forceRefresh = req.query.refresh === "true" || req.headers["cache-control"] === "no-cache";
+    const isSpecialQuery = req.query.includeInactive === "true" || req.query.isActive !== undefined;
+    const forceRefresh = req.query.refresh === "true" || req.headers["cache-control"] === "no-cache" || isSpecialQuery;
     if (!forceRefresh && cachedCategories && now - lastCacheTime < CACHE_TTL_MS) {
       res.json({
         success: true,
@@ -219,20 +220,27 @@ export const getCategories = async (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    let categories = await Category.find({ slug: { $nin: ["air-pumps", "electrical-spare-accessories"] } })
+    const catFilter: Record<string, any> = { slug: { $nin: ["air-pumps", "electrical-spare-accessories"] } };
+    if (req.query.isActive !== undefined) {
+      catFilter.isActive = req.query.isActive === "true";
+    } else if (req.query.includeInactive !== "true") {
+      catFilter.isActive = { $ne: false };
+    }
+
+    let categories = await Category.find(catFilter)
       .sort({ sortOrder: 1, createdAt: 1 })
       .lean();
 
     // Auto-seed if database has no categories or fewer than 20
-    if (categories.length < DEFAULT_CATEGORIES.length) {
+    if (categories.length < DEFAULT_CATEGORIES.length && !isSpecialQuery) {
       for (const cat of DEFAULT_CATEGORIES) {
         await Category.findOneAndUpdate(
           { slug: cat.slug },
-          { $set: cat },
+          { $set: { ...cat, isActive: true } },
           { upsert: true, new: true }
         );
       }
-      categories = await Category.find({ slug: { $nin: ["air-pumps", "electrical-spare-accessories"] } })
+      categories = await Category.find(catFilter)
         .sort({ sortOrder: 1, createdAt: 1 })
         .lean();
     }
@@ -247,8 +255,10 @@ export const getCategories = async (req: Request, res: Response, next: NextFunct
       };
     });
 
-    cachedCategories = categoriesWithRealCounts;
-    lastCacheTime = now;
+    if (!isSpecialQuery) {
+      cachedCategories = categoriesWithRealCounts;
+      lastCacheTime = now;
+    }
 
     res.json({
       success: true,
@@ -262,13 +272,25 @@ export const getCategories = async (req: Request, res: Response, next: NextFunct
 export const getCategoryBySlug = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { slug } = req.params;
-    let category = await Category.findOne({ slug });
+    const catQuery: Record<string, any> = { slug };
+    if (req.query.includeInactive !== "true") {
+      catQuery.isActive = { $ne: false };
+    }
+    let category = await Category.findOne(catQuery);
 
     if (!category) {
+      if (req.query.includeInactive !== "true") {
+        // Also check if it exists but is inactive
+        const inactiveCat = await Category.findOne({ slug });
+        if (inactiveCat) {
+          res.status(404).json({ success: false, message: "Category is currently inactive" });
+          return;
+        }
+      }
       // Check in default list as fallback
       const def = DEFAULT_CATEGORIES.find((c) => c.slug === slug);
       if (def) {
-        category = await Category.create(def);
+        category = await Category.create({ ...def, isActive: true });
       } else {
         res.status(404).json({ success: false, message: "Category not found" });
         return;
@@ -302,6 +324,11 @@ export const createCategory = async (req: Request, res: Response, next: NextFunc
     }
     if (!data.image || !data.image.trim()) {
       data.image = "/categories/aquariums-tanks.jpg";
+    }
+    if (data.isActive !== undefined) {
+      data.isActive = Boolean(data.isActive);
+    } else {
+      data.isActive = true;
     }
 
     const existing = await Category.findOne({ slug: data.slug });

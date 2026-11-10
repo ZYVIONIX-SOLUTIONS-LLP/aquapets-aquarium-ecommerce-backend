@@ -25,6 +25,7 @@ export interface IProduct extends Document {
   isFeatured: boolean;
   isStarterKit: boolean;
   isOffer: boolean;
+  isActive: boolean;
   offerType?: "Discount" | "Buy 1 Get 1" | "Buy 2 Get 1" | "Bundle Offer" | "Combo Deal" | "Limited Time";
   tankType?: "Freshwater" | "Planted Tank" | "Marine" | "Nano";
   weightKg?: number;
@@ -67,6 +68,7 @@ const productSchema = new Schema<IProduct>(
     isFeatured: { type: Boolean, default: false, index: true },
     isStarterKit: { type: Boolean, default: false, index: true },
     isOffer: { type: Boolean, default: false, index: true },
+    isActive: { type: Boolean, default: true, index: true },
     offerType: {
       type: String,
       enum: ["Discount", "Buy 1 Get 1", "Buy 2 Get 1", "Bundle Offer", "Combo Deal", "Limited Time", null, ""],
@@ -93,6 +95,7 @@ productSchema.index({ category: 1, price: 1 });
 productSchema.index({ isFeatured: 1, createdAt: -1 });
 productSchema.index({ isOffer: 1, createdAt: -1 });
 productSchema.index({ isStarterKit: 1, createdAt: -1 });
+productSchema.index({ isActive: 1, createdAt: -1 });
 productSchema.index({ createdAt: -1 });
 
 export const Product = model<IProduct>("Product", productSchema);
