@@ -1,3 +1,5 @@
+import { sendBotMessage } from "./whatsappBotService.js";
+
 /**
  * WhatsApp Notification Service for Aqua Pets Backend, Shop Owner & Customer
  */
@@ -165,6 +167,17 @@ export async function sendWhatsAppMessage(recipientPhone: string, messageText: s
   if (!cleanPhone || cleanPhone.length < 10) {
     console.warn("⚠️ Invalid WhatsApp recipient phone number:", recipientPhone);
     return false;
+  }
+
+  // Gateway 0: Native Self-Hosted WhatsApp Web Bot (Baileys)
+  try {
+    const botSent = await sendBotMessage(cleanPhone, messageText);
+    if (botSent) {
+      console.log(`✅ [WhatsApp Bot] Alert sent directly to ${cleanPhone}`);
+      return true;
+    }
+  } catch (botErr: any) {
+    console.warn("⚠️ [WhatsApp Bot] Native dispatch error:", botErr.message);
   }
 
   // Gateway 1: Meta WhatsApp Business Cloud API (Official)

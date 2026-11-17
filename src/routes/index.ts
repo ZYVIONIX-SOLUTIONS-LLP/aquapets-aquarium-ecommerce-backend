@@ -10,6 +10,7 @@ import uploadRoutes from "./uploadRoutes.js";
 import wishlistRoutes from "./wishlistRoutes.js";
 import subscriberRoutes from "./subscriberRoutes.js";
 import cartRoutes from "./cartRoutes.js";
+import whatsappRoutes from "./whatsappRoutes.js";
 
 const router = Router();
 
@@ -54,5 +55,6 @@ router.use("/upload", uploadRoutes);
 router.use("/wishlist", wishlistRoutes);
 router.use("/cart", cartRoutes);
 router.use("/subscribers", subscriberRoutes);
+router.use("/whatsapp", whatsappRoutes);
 
 export default router;

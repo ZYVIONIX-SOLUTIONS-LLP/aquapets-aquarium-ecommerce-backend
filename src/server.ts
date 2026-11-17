@@ -1,10 +1,16 @@
 import app from "./app.js";
 import { config } from "./config/env.js";
 import { connectDB } from "./config/db.js";
+import { initWhatsAppBot } from "./services/whatsappBotService.js";
 
 
 const startServer = async () => {
   await connectDB();
+
+  // Initialize native WhatsApp Bot pairing session
+  initWhatsAppBot().catch((err) => {
+    console.warn("⚠️ WhatsApp Bot auto-init warning:", err.message);
+  });
 
   const server = app.listen(config.port, "0.0.0.0", () => {
     console.log(`

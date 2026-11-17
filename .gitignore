@@ -18,3 +18,7 @@ npm-debug.log*
 # Store OS files
 .DS_Store
 Thumbs.db
+
+# WhatsApp Session Keys
+whatsapp_session/
+
