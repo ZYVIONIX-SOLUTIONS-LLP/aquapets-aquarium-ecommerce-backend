@@ -66,7 +66,7 @@ router.post("/test-courier", async (req: Request, res: Response) => {
     const url = await sendShopOwnerNotification({
       orderNumber: "AQ-812349",
       customerName: "Rahul Sharma",
-      customerPhone: "+91 98476 21685",
+      customerPhone: "+91 94471 22334",
       shippingAddress: {
         houseBuilding: "Palm Grove, Apt 4B",
         street: "Kaloor - Kadavanthra Road",

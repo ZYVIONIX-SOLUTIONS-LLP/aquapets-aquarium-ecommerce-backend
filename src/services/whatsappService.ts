@@ -29,7 +29,7 @@ export interface WhatsAppOrderData {
   notes?: string;
 }
 
-export const SHOP_OWNER_WHATSAPP_NUMBER = process.env.SHOP_OWNER_WHATSAPP || "916238392582";
+export const SHOP_OWNER_WHATSAPP_NUMBER = process.env.SHOP_OWNER_WHATSAPP || "919847621685";
 
 /**
  * Clean & normalize phone number into E.164 without '+' or spaces (e.g. 919876543210)
