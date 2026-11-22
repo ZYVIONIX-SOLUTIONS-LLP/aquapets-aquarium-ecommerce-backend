@@ -28,7 +28,13 @@ export const getProducts = async (req: Request, res: Response, next: NextFunctio
     if (isFeatured === "true") query.isFeatured = true;
     if (isStarterKit === "true") query.isStarterKit = true;
     if (isOffer === "true") {
-      query.isOffer = true;
+      const offerCondition = [{ isOffer: true }, { discount: { $gt: 0 } }];
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: offerCondition }];
+        delete query.$or;
+      } else {
+        query.$or = offerCondition;
+      }
     }
     if (badge) query.badge = badge;
 
