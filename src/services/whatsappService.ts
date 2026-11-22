@@ -1,4 +1,5 @@
 import { sendBotMessage } from "./whatsappBotService.js";
+import { config } from "../config/env.js";
 
 /**
  * WhatsApp Notification Service for Aqua Pets Backend, Shop Owner & Customer
@@ -114,7 +115,7 @@ export function formatCustomerOrderMessage(data: WhatsAppOrderData): string {
     )
     .join("\n");
 
-  const clientDomain = process.env.CLIENT_URL || "https://aquapets.in";
+  const clientDomain = config.clientUrl || "https://aquapetsaquarium.com";
   const trackUrl = `${clientDomain}/track-order?id=${data.orderNumber}`;
 
   const courierChargeLine = isPorter

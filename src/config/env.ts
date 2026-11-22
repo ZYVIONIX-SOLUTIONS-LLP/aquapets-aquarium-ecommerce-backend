@@ -1,10 +1,21 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+const resolveClientUrl = (): string => {
+  if (process.env.NODE_ENV === "production") {
+    // In production, always default to the live production storefront domain unless custom domain is given
+    if (process.env.CLIENT_URL && !process.env.CLIENT_URL.includes("localhost") && !process.env.CLIENT_URL.includes("127.0.0.1")) {
+      return process.env.CLIENT_URL.replace(/\/$/, "");
+    }
+    return "https://aquapetsaquarium.com";
+  }
+  return process.env.CLIENT_URL || "http://localhost:3000";
+};
+
 export const config = {
   port: parseInt(process.env.PORT || "5000", 10),
   nodeEnv: process.env.NODE_ENV || "development",
-  clientUrl: process.env.CLIENT_URL || (process.env.NODE_ENV === "production" ? "https://aquapetsaquarium.com" : "http://localhost:3000"),
+  clientUrl: resolveClientUrl(),
   mongodbUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/aqua_pets_aquarium",
   jwtSecret: process.env.JWT_SECRET || "aqua_pets_super_secret_jwt_key_2026",
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "7d",
