@@ -1,84 +1,3 @@
-// import express from "express";
-// import cors from "cors";
-// import helmet from "helmet";
-// import morgan from "morgan";
-// import compression from "compression";
-// import routes from "./routes/index.js";
-// import { errorHandler } from "./middleware/errorHandler.js";
-// import { config } from "./config/env.js";
-
-// const app = express();
-
-// // Trust reverse proxy (Essential for Nginx on Hostinger VPS)
-// app.set("trust proxy", 1);
-
-// // Performance and utility middleware
-// app.use(compression());
-// app.use(helmet({ crossOriginResourcePolicy: false }));
-
-// const allowedOrigins = [
-//   config.clientUrl,
-//   process.env.ADMIN_URL,
-//   "https://aquapetsaquarium.com",
-//   "https://www.aquapetsaquarium.com",
-//   "https://admin.aquapetsaquarium.com",
-//   "http://localhost:3000",
-//   "http://127.0.0.1:3000",
-//   "http://localhost:3001",
-//   "http://127.0.0.1:3001",
-// ].filter(Boolean);
-
-// app.use(
-//   cors({
-//     origin: (origin, callback) => {
-//       // Allow non-browser requests (mobile apps, server-to-server, curl)
-//       if (!origin) return callback(null, true);
-
-//       const isAllowed =
-//         allowedOrigins.includes(origin) ||
-//         process.env.NODE_ENV !== "production" ||
-//         origin.includes("localhost") ||
-//         origin.includes("127.0.0.1") ||
-//         origin.includes("aquapetsaquarium.com");
-
-//       if (isAllowed) {
-//         return callback(null, true);
-//       }
-//       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
-//     },
-//     credentials: true,
-//   })
-// );
-// app.use(morgan("dev"));
-// app.use(express.json({ limit: "50mb" }));
-// app.use(express.urlencoded({ limit: "50mb", extended: true }));
-
-// // API Endpoints
-// app.get("/", (req, res) => {
-//   res.json({
-//     message: "Aqua Pets Aquarium API Server",
-//     docs: "/api",
-//     health: "/api/health",
-//   });
-// });
-
-// app.use("/api", routes);
-
-// // Global Error Handler
-// app.use(errorHandler);
-
-// export default app;
-
-
-
-
-
-
-
-
-
-
-
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -109,9 +28,12 @@ const allowedOrigins = [
   // Production customer website
   "https://aquapetsaquarium.com",
   "https://www.aquapetsaquarium.com",
+  "http://aquapetsaquarium.com",
+  "http://www.aquapetsaquarium.com",
 
   // Production admin panel
   "https://admin.aquapetsaquarium.com",
+  "http://admin.aquapetsaquarium.com",
 
   // Local development
   "http://localhost:3000",
@@ -125,19 +47,24 @@ const allowedOrigins = [
 // CORS configuration
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    // Allow mobile apps, curl and server-to-server requests
+    // Allow mobile apps, curl, Postman, and server-to-server requests
     if (!origin) {
       return callback(null, true);
     }
 
-    // Allow only explicitly configured origins
-    if (allowedOrigins.includes(origin)) {
+    // Allow explicitly configured origins OR any aquapetsaquarium.com subdomain/protocol
+    const isAquaDomain = origin.includes("aquapetsaquarium.com");
+    const isLocalOrLan =
+      origin.includes("localhost") ||
+      origin.includes("127.0.0.1") ||
+      origin.includes("172.20.") ||
+      origin.includes("192.168.");
+
+    if (allowedOrigins.includes(origin) || isAquaDomain || isLocalOrLan) {
       return callback(null, true);
     }
 
     console.warn(`CORS blocked origin: ${origin}`);
-
-    // Reject without throwing a server error
     return callback(null, false);
   },
 
@@ -153,11 +80,7 @@ const corsOptions: cors.CorsOptions = {
     "OPTIONS",
   ],
 
-  // Let cors reflect the browser's requested headers
-  // This supports Authorization and custom frontend headers
-
   optionsSuccessStatus: 204,
-
   maxAge: 86400,
 };
 
