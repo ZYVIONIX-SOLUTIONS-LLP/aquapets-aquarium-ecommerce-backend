@@ -152,6 +152,13 @@ export const sendNewsletterEmail = async (
     return { success: true, sentCount: recipients.length, simulated: true };
   }
 
+  const storefrontUrl =
+    config.clientUrl &&
+    !config.clientUrl.includes("localhost") &&
+    !config.clientUrl.includes("127.0.0.1")
+      ? `${config.clientUrl}/shop`
+      : "https://aquapetsaquarium.com/shop";
+
   const formattedHtml = `
     <!DOCTYPE html>
     <html>
@@ -178,7 +185,7 @@ export const sendNewsletterEmail = async (
           <div class="body">
             <h2 style="color: #06233a; font-size: 18px; margin-top: 0;">${subject}</h2>
             <div class="content-box">${content}</div>
-            <a href="${config.clientUrl}/shop" class="cta-btn">Visit Storefront →</a>
+            <a href="${storefrontUrl}" class="cta-btn">Visit Storefront →</a>
           </div>
           <div class="footer">
             &copy; ${new Date().getFullYear()} AquaPets Aquarium. All rights reserved.<br/>
